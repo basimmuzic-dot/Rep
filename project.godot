@@ -15,6 +15,11 @@ run/main_scene="res://scenes/main.tscn"
 GameState="*res://scripts/game_state.gd"
 StoryData="*res://scripts/story_data.gd"
 
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+
 [debug]
 
 gdscript/warnings/unused_variable=1
@@ -24,8 +29,7 @@ gdscript/warnings/unused_argument=1
 
 window/size/viewport_width=1280
 window/size/viewport_height=720
-window/size/resizable=false
-mouse_input/capture=true
+window/size/resizable=true
 
 [input]
 

@@ -1,244 +1,329 @@
 extends Node
-## Pure data container for all narrative content
+## Narrative content. Pure data, no logic.
+##
+## Case option kinds:  approve | review | decline  (Act I)
+##                     investigate | accept | escalate (Act II)
+## Every option converges on the same machinery: the system absorbs the choice.
 
-const ACTS = {
-	1: {
-		"cases": [
-			{
-				"id": "loan_1",
-				"title": "Loan Application: Kessara North Water Project",
-				"body": "The village council in Kessara North seeks a $2M loan to develop water infrastructure. Their proposal is thorough. Our preliminary assessment shows the land is fertile; development could expand significantly. [Fine print mentions a land-option clause giving us mineral extraction rights if project fails.]",
-				"choices": ["Approve", "Request Full Review", "Decline"],
-				"approving_text": "Loan approved. Villages will have clean water for years.",
-				"investigating_text": "You review the fine print. The extraction clause is buried in subsection 14.7. If the project faces any difficulty, we can seize land for mining operations.",
-				"correct_choice": "Request Full Review",
-				"impact": "helped",
-				"dissonance_delta": [5, 0, 15],
-			},
-			{
-				"id": "healthcare_1",
-				"title": "Medical Shipment: Kessara Central Clinic",
-				"body": "Request to send a containerload of pharmaceutical supplies and diagnostic equipment to the clinic serving 30,000 people in Kessara Central. The clinic currently uses traditional herbal medicine and midwifery. Our equipment and drugs will modernize care.",
-				"choices": ["Approve Shipment", "Request Environmental Study", "Decline"],
-				"approving_text": "Shipment approved. The clinic will save countless lives with modern medicine.",
-				"investigating_text": "The environmental study reveals a risk: the clinic will become dependent on supply chains we control. Local practitioners have been displaced in similar rollouts. Within 5 years, if we withdraw, the clinic has no one to run it.",
-				"correct_choice": "Request Environmental Study",
-				"impact": "helped",
-				"dissonance_delta": [8, 2, 18],
-			},
-			{
-				"id": "development_1",
-				"title": "Infrastructure Development: Kessara Regional Authority",
-				"body": "The Regional Authority has requested $5M to build roads, power lines, and market facilities. This will open the region to commerce. The Authority is led by the Provincial Governor, a longtime partner.",
-				"choices": ["Approve Contract", "Audit Leadership", "Decline"],
-				"approving_text": "Development contract signed. The roads will transform the region's economy.",
-				"investigating_text": "An audit reveals the Governor and his family own 60% of the companies bidding on the project. The 'development' primarily benefits the elite; the benefit to ordinary people is negligible.",
-				"correct_choice": "Audit Leadership",
-				"impact": "helped",
-				"dissonance_delta": [10, 3, 20],
-			},
-			{
-				"id": "school_grant",
-				"title": "Educational Grant: North Kessara Schools",
-				"body": "Request for $800K to build three schools and supply materials. Current literacy rate is 35%. The proposal includes teacher training.",
-				"choices": ["Approve Grant", "Verify Curriculum", "Decline"],
-				"approving_text": "Grant approved. A generation of children will now have access to education.",
-				"investigating_text": "Curriculum review shows the materials focus heavily on corporate branding and 'partnership' themes. The school will teach children to see Meridian Concord as their savior.",
-				"correct_choice": "Verify Curriculum",
-				"impact": "helped",
-				"dissonance_delta": [7, 1, 16],
-			},
-			{
-				"id": "agricultural_tech",
-				"title": "Agricultural Technology Transfer: Kessara Farming Cooperatives",
-				"body": "Cooperatives request seeds, fertilizers, and training in modern farming. They promise to increase yields significantly. Our agricultural division has surplus inventory.",
-				"choices": ["Approve Program", "Review Seed Terms", "Decline"],
-				"approving_text": "Program approved. Farmers will produce more food, reducing hunger.",
-				"investigating_text": "The seed contract requires replanting new seeds each year; farmers cannot replant their own harvest. They become locked into purchasing from us annually.",
-				"correct_choice": "Review Seed Terms",
-				"impact": "helped",
-				"dissonance_delta": [9, 2, 17],
-			},
-			{
-				"id": "microfinance",
-				"title": "Microfinance Initiative: Kessara Women's Entrepreneur Collective",
-				"body": "Women's collective requests small business loans at favorable rates to start shops and services. Projected to generate 500 jobs.",
-				"choices": ["Approve Initiative", "Check Interest Rates", "Decline"],
-				"approving_text": "Initiative approved. Women will gain economic independence.",
-				"investigating_text": "The 'favorable' 12% interest rate is actually predatory in a region where traditional lending is 3%. Many borrowers will default within 3 years.",
-				"correct_choice": "Check Interest Rates",
-				"impact": "helped",
-				"dissonance_delta": [6, 0, 14],
-			},
-		]
-	},
-	2: {
-		"cases": [
-			{
-				"id": "famine_report",
-				"title": "Field Report: Famine in Northern Villages",
-				"body": "A report from our field team indicates severe crop failure in the three villages that received the water project loan. Food is scarce. The report speculates it may be due to contamination of the irrigation system. They request authorization to send emergency food aid.",
-				"choices": ["[Investigate]", "[Accept Talking Points]"],
-				"approving_text": "You rationalize: crop failures happen. We can send aid. We're not responsible for weather.",
-				"investigating_text": "Investigation reveals the contamination was caused by our mineral extraction operations upstream. The extraction began after the water project had issues, triggering the extraction clause. We poisoned the water to open mining.",
-				"correct_choice": "[Investigate]",
-				"impact": "investigated",
-				"dissonance_delta": [12, 25],
-			},
-			{
-				"id": "clinic_incident",
-				"title": "Internal Memo: Clinic Complications",
-				"body": "A clinic director reports unexpected complications. Women receiving our medications for routine care are experiencing unexplained infertility. The memo notes this is a 'minor setback' and requests guidance.",
-				"choices": ["[Investigate]", "[Accept Talking Points]"],
-				"approving_text": "You write back: 'Monitor situation, report monthly. Do not alarm patients.'",
-				"investigating_text": "Deeper investigation: the pharmaceutical batch was an expired trial drug never approved for human use. The clinic director knew. Our team approved the shipment knowing it was surplus trial stock.",
-				"correct_choice": "[Investigate]",
-				"impact": "investigated",
-				"dissonance_delta": [15, 30],
-			},
-			{
-				"id": "activist_memo",
-				"title": "Leaked Document: Activist Coalition Analysis",
-				"body": "A memo surfaces from a regional activist group. It details a series of observations: villagers dislocated by our development projects, the Regional Governor's enrichment, the school curriculum's propaganda. The memo concludes: 'Meridian Concord is consolidating control of Kessara for economic extraction.'",
-				"choices": ["[Investigate]", "[Accept Talking Points]"],
-				"approving_text": "You dismiss it as exaggeration. Activists always inflate problems. Our intentions are good.",
-				"investigating_text": "You read the entire memo. Every claim is documented with specific examples, interviews, and financial records. The pattern is undeniable. You realize you've been executing the exact blueprint described.",
-				"correct_choice": "[Investigate]",
-				"impact": "investigated",
-				"dissonance_delta": [20, 35],
-			},
-			{
-				"id": "power_struggle",
-				"title": "Intelligence Report: Political Coup Planned",
-				"body": "An intelligence report warns of an imminent coup attempt. The Regional Governor (our development partner) is funding private militia with money from the infrastructure project. He plans to consolidate power. Our headquarters suggests we publicly withdraw support and distance ourselves.",
-				"choices": ["[Investigate]", "[Accept Talking Points]"],
-				"approving_text": "You draft a statement withdrawing support. Meridian Concord values democracy.",
-				"investigating_text": "Deeper digging: Meridian's leadership anticipated this. We funded the development project KNOWING it would enable this coup. The chaos that follows will allow us to acquire land at pennies on the dollar.",
-				"correct_choice": "[Investigate]",
-				"impact": "investigated",
-				"dissonance_delta": [18, 32],
-			},
-			{
-				"id": "whistleblower",
-				"title": "Anonymous Tip: Corruption Within",
-				"body": "An anonymous whistleblower sends evidence that our regional team has been embezzling from aid budgets. The evidence is solid. A decision is needed: investigation or quiet settlement.",
-				"choices": ["[Investigate]", "[Accept Talking Points]"],
-				"approving_text": "You recommend a quiet settlement with the team member. Public scandal helps no one.",
-				"investigating_text": "Full investigation reveals the embezzlement was systematic, approved at middle management. But also: this person has documentation that Meridian HQ knew about every scheme we've been approving. They're being offered hush money and exile.",
-				"correct_choice": "[Investigate]",
-				"impact": "investigated",
-				"dissonance_delta": [17, 33],
-			},
-		]
-	},
-	3: {
-		"cases": [
-			{
-				"id": "final_authorization",
-				"title": "Final Authorization: Meridian's Strategic Expansion",
-				"body": "Headquarters requests final sign-off on Project Meridian: a plan to formalize control of Kessara's water, food supply, and political system through a series of strategic acquisitions, using our humanitarian projects as cover. The region will become a 'corporate development zone.' Implementation will silence critics and consolidate power. Your three choices:",
-				"choices": ["SIGN THE AUTHORIZATION", "REFUSE THE AUTHORIZATION", "LEAK THE DOCUMENTS"],
-				"approving_text": "",
-				"investigating_text": "",
-				"correct_choice": "REFUSE THE AUTHORIZATION",
-				"impact": "final_choice",
-				"pen_pal_outcomes": {
-					"SIGN THE AUTHORIZATION": ["silenced", "silenced", "alive"],
-					"REFUSE THE AUTHORIZATION": ["alive", "alive", "silenced"],
-					"LEAK THE DOCUMENTS": ["alive", "alive", "silenced"],
-				},
-				"dissonance_delta": [50, 50, 50],
-			},
-		]
-	},
+const STYLES := {
+	"pragmatist": {"name": "THE PRAGMATIST", "blurb": "Results matter. Good intentions feed no one."},
+	"idealist": {"name": "THE IDEALIST", "blurb": "Systems can be changed from the inside. Someone has to try."},
+	"cynic": {"name": "THE CYNIC", "blurb": "You assume the worst. You still can't stop it."},
 }
 
-const PEN_PALS = {
-	"Amara": {
-		"region": "Kessara North",
-		"role": "Primary School Teacher",
-		"initial_message": "Hello! I'm Amara, a teacher at North Kessara Primary. I wanted to thank you personally for approving the school grant. The children have new materials and hope. Thank you for caring about our future.",
-		"messages": [
-			"The curriculum arrived. It's beautiful. But I notice... it seems to emphasize Meridian Concord rather a lot. Is this normal?",
-			"Some children are asking if Meridian Concord is our country now. I don't know how to answer. Are we becoming dependent on you?",
-			"Three of my students' families have been dislocated by the infrastructure project. They're moving to the city. What happened to development?",
-			"I received a letter offering me a job at Meridian's corporate education program. Better pay. But it would mean leaving the village. I don't know what to do.",
-			"I'm closing my school. The regional authority has transferred our land for a development project. I'm moving away.",
-		]
-	},
-	"Dr. Teo": {
-		"region": "Kessara Central",
-		"role": "Clinic Nurse",
-		"initial_message": "Dr. Teo here. Thank you for the medical shipment. The equipment is remarkable. My team is learning to use it. The patients are grateful.",
-		"messages": [
-			"Something is wrong. Women receiving the new medications are getting sick. I'm documenting everything, but I'm frightened. What if this is our fault?",
-			"I confronted my director about the medications. He told me to stay quiet. He seemed scared. I think he knew.",
-			"The medications came from a trial program that was never approved. Our director bought the surplus. We've been testing experimental drugs on our patients without consent.",
-			"I'm trying to blow the whistle, but I'm afraid. Meridian has made it clear that speaking out will destroy my career. They own the clinic.",
-			"I left. I took jobs at three different clinics under assumed names. I'm hiding. I'm sorry I couldn't stay and help you see the truth sooner.",
-		]
-	},
-	"Jun": {
-		"region": "Kessara North",
-		"role": "Teenager, Goat Farmer",
-		"initial_message": "Hi! I'm Jun. I help my family with our goats. I heard we got a water project! That's exciting. My goats will have better water to drink. Thanks!",
-		"messages": [
-			"The new seeds are amazing! Our crops are bigger than ever. My family is making real money now. I'm going to be able to go to the school you funded!",
-			"Wait. What's happening? My family has to buy new seeds every year now? We can't replant our own harvest? The costs are going up. Dad is worried.",
-			"Dad lost the farm. We couldn't afford the seeds. We sold everything to the Regional Authority for almost nothing. They're turning it into some kind of mining operation?",
-			"I'm in the city now. Working in a factory. I miss my goats. I miss the land. I miss home. This wasn't supposed to happen.",
-			"I read the documents you leaked. The activist memo was right about everything. Why did it take you so long? My whole region is ruined.",
-		]
-	},
+# Per-style starting dissonance and how fast guilt accumulates.
+const STYLE_RATE := {"pragmatist": 1.0, "idealist": 1.25, "cynic": 0.85}
+const STYLE_START := {"pragmatist": 4, "idealist": 0, "cynic": 14}
+
+const ACT_TITLES := {
+	1: ["ACT I", "The Mundane"],
+	2: ["ACT II", "Fragments"],
+	3: ["ACT III", "Authorization 77-K"],
 }
 
-const ENDINGS = {
+const CASES := [
+	# ───────────────────────── ACT I ─────────────────────────
+	{
+		"id": "water", "act": 1, "from": "Regional Desk, Kessara",
+		"title": "Loan 0412 · Kessara North Water Project",
+		"body": "The village council of Kessara North asks for a $2M low-interest loan to dig wells and lay pipe. Three hundred families currently walk two hours for water. Their proposal is meticulous; someone has clearly sat up late over it.",
+		"fine": "Sec. 14.7 — If the project \"experiences material delay,\" mineral and land-use rights revert to the Lender.",
+		"msg": ["Amara", "Dear friend at Concord — the children drew you a picture. It is mostly a well, and a very large smiling man in a tie. That is you. Thank you for listening."],
+		"helped": 12000,
+		"options": [
+			{"k": "approve", "label": "Approve as submitted", "dis": 2,
+			 "res": "Approved. The system chimes. Somewhere, a backhoe is being scheduled."},
+			{"k": "review", "label": "Send the fine print to Legal", "dis": 6,
+			 "res": "Legal answers in four minutes: standard language, used in every Concord loan. You approve with a note in the margin. The note is archived. Nobody reads archives."},
+			{"k": "decline", "label": "Decline until terms improve", "dis": 4,
+			 "res": "Your decline is overturned by the Regional Director before lunch. The loan proceeds under his name. The ticker still credits the quarter."},
+		],
+	},
+	{
+		"id": "clinic", "act": 1, "from": "Health Logistics",
+		"title": "Shipment 88 · Kessara Central Clinic",
+		"body": "One container of pharmaceuticals and diagnostic equipment for a clinic serving thirty thousand people. At present the clinic runs on a handful of nurses, a midwife network, and herbal remedies. Our equipment will modernize everything.",
+		"fine": "Appx. C — Equipment is leased, not donated. Consumables available exclusively from Concord Health Supply.",
+		"msg": ["Dr. Teo", "Your shipment manifest reached us. I have never held a working ultrasound! Between us, the old midwives are grumbling. Pride is a heavy thing. I told them a good tool is a good tool."],
+		"helped": 30000,
+		"options": [
+			{"k": "approve", "label": "Approve shipment", "dis": 2,
+			 "res": "Approved. By Friday the clinic has a machine that can see a heartbeat. By next spring it will have no one who knows how to work without it."},
+			{"k": "review", "label": "Request a dependency study", "dis": 6,
+			 "res": "The study returns: \"Moderate sustainability risk, mitigable through long-term partnership.\" Long-term partnership is another word for the contract you are about to sign."},
+			{"k": "decline", "label": "Decline", "dis": 4,
+			 "res": "Declined. The shipment is rerouted through the Provincial Health Office, which marks it up fourfold. The clinic receives it anyway, eight months late and on worse terms."},
+		],
+	},
+	{
+		"id": "roads", "act": 1, "from": "Infrastructure Partnerships",
+		"title": "Contract 17 · Regional Roads and Power",
+		"body": "The Provincial Authority requests $5M for roads, power lines and a market hall. The Governor is a longtime partner of Concord, warm on calls, generous with local hospitality. The bidding firms are all \"regionally owned.\"",
+		"fine": "Bidder registry — Four of five bidders list the Governor's brother-in-law as a director.",
+		"msg": ["Jun", "hi!! my goat had twins!!! I named them Loan and Interest, as a joke Teacher told me about. is that a joke? she laughed a weird way. anyway when the road comes my uncle says the goat cheese can go to the city."],
+		"helped": 41000,
+		"options": [
+			{"k": "approve", "label": "Sign the contract", "dis": 3,
+			 "res": "Signed. The Governor sends a handwritten thank-you note and a case of excellent coffee. You drink it for weeks."},
+			{"k": "review", "label": "Request a bidder audit", "dis": 7,
+			 "res": "The audit confirms all bidders are \"independent.\" The Governor is wounded by the suggestion and sends flowers to apologize for the inconvenience. The contract proceeds."},
+			{"k": "decline", "label": "Decline", "dis": 4,
+			 "res": "The Governor calls your Director personally. Your decline is reclassified as a clerical hold, then released. He is gracious about it."},
+		],
+	},
+	{
+		"id": "school", "act": 1, "from": "Education Fund",
+		"title": "Grant 211 · Northern Schools Initiative",
+		"body": "Three new schools and teacher training for a region with thirty-five percent literacy. The materials arrive in glossy folders, pre-translated, with a branded curriculum called Concord Pathways. The teachers are thrilled to have anything at all.",
+		"fine": "Pathways Unit 4: \"Debt Is a Partnership.\" Unit 7: \"Why Resource Agreements Protect Families.\"",
+		"msg": ["Amara", "The new textbooks are beautiful. Full colour! Unit 4 is about debt. I did not know debt had a unit, but I suppose everything does. The children are learning fast. I am proud of them."],
+		"helped": 18000,
+		"options": [
+			{"k": "approve", "label": "Approve the grant", "dis": 2,
+			 "res": "Approved. A generation will learn to read from your folders."},
+			{"k": "review", "label": "Review the curriculum", "dis": 6,
+			 "res": "Curriculum Review notes \"alignment with partner values.\" They suggest it be called a feature. You tag the file as a feature."},
+			{"k": "decline", "label": "Decline", "dis": 4,
+			 "res": "Declined. The schools are funded by the Regional Authority instead, with the same folders, and a worse teacher-training budget."},
+		],
+	},
+	{
+		"id": "seed", "act": 1, "from": "Agricultural Division",
+		"title": "Program 56 · Farming Cooperative Partnership",
+		"body": "Improved seed, fertilizer and training for the northern cooperatives, who have asked for it by name. Projected yields rise forty percent. The Agricultural Division has surplus inventory it would like to move before the season turns.",
+		"fine": "Seed license — Harvested seed may not be saved or replanted. Licensed per season.",
+		"msg": ["Jun", "dad says the new seeds are very good but you have to buy them every year, even though a seed is literally a seed. he laughed about it. then he stopped laughing. is it still a joke."],
+		"helped": 26000,
+		"options": [
+			{"k": "approve", "label": "Approve the program", "dis": 2,
+			 "res": "Approved. The first harvest is spectacular. You are sent a photo; the field is the exact green of a banknote."},
+			{"k": "review", "label": "Review seed terms", "dis": 6,
+			 "res": "Legal confirms the license is lawful, \"industry standard,\" and \"in the farmers' interest as an innovation incentive.\" You approve with a feeling you decide not to name."},
+			{"k": "decline", "label": "Decline", "dis": 4,
+			 "res": "Declined. A rival conglomerate quietly buys the same cooperatives the following month, with a harsher license."},
+		],
+	},
+	{
+		"id": "credit", "act": 1, "from": "Microfinance",
+		"title": "Facility 33 · Women's Cooperative Credit",
+		"body": "A revolving credit pool for market women in the Kessara highlands. Small loans, quick repayment, group guarantees. Last quarter's brochure used a photograph of one of them laughing. They looked happy. They may have been.",
+		"fine": "Collateral — Land deeds held in escrow. Interest compounds on default, and defaults are cross-guaranteed across the group.",
+		"msg": ["Dr. Teo", "Three women came in this week with the same complaint: they cannot sleep. I gave them what I had. It was not medicine they needed. I do not know what to call what they need."],
+		"helped": 9000,
+		"options": [
+			{"k": "approve", "label": "Approve the facility", "dis": 2,
+			 "res": "Approved. The first month's repayment rate is 99.1%. Your Director forwards the number to the board with three exclamation marks."},
+			{"k": "review", "label": "Query the collateral terms", "dis": 6,
+			 "res": "Underwriting explains that \"group guarantees are the mechanism of financial inclusion.\" You are thanked for your diligence and invited to speak at a conference."},
+			{"k": "decline", "label": "Decline", "dis": 4,
+			 "res": "Declined. The women borrow from a private lender instead, at terms that would make Concord blush, if Concord could."},
+		],
+	},
+	# ───────────────────────── ACT II ─────────────────────────
+	{
+		"id": "famine", "act": 2, "from": "Field Report · Unverified",
+		"title": "Report · Kessara North, Hunger Season",
+		"body": "A field coordinator writes that three villages are in famine. The wells you funded are working, but the harvest failed and the loan fell into default. Under the land-option clause, fields were repossessed and \"consolidated.\" Children are being fed from Concord relief packages.",
+		"fine": "Talking points memo: \"Seasonal food insecurity is a regional constant, unrelated to financing arrangements.\"",
+		"msg": ["Amara", "The school has fewer children each week. Their parents have left to look for work in the city. I stand at the board and talk to desks. I am not angry. I want you to know I am not angry."],
+		"helped": 0,
+		"options": [
+			{"k": "investigate", "label": "Pull the loan records", "dis": 14,
+			 "res": "Every repossessed field was on your approval chain. The date stamps are in sequence. You can see the exact afternoon each family lost its land. It was the afternoon you were pleased with yourself."},
+			{"k": "accept", "label": "Accept the talking points", "dis": 3,
+			 "res": "Seasonal. It is a reasonable word. You file the report under unverified and feel something loosen in your chest."},
+			{"k": "escalate", "label": "Escalate to Ethics", "dis": 8,
+			 "res": "Ethics acknowledges receipt automatically. The ticket is closed in six minutes with the resolution code ALIGNED. You do not know what it was aligned to."},
+		],
+	},
+	{
+		"id": "trial", "act": 2, "from": "Clinic Staff · Anonymous",
+		"title": "Report · Central Clinic, Unconsented Trial",
+		"body": "A nurse writes that a new contraceptive-adjacent compound, supplied under the Concord health shipment, is being administered to women as a \"free vitamin injection.\" No consent forms. Staff report a pattern of complications and permanent infertility.",
+		"fine": "Phase III Compliance memo: \"Observational data. Local clinics do not meet reporting standards for adverse events.\"",
+		"msg": ["Dr. Teo", "I am writing from my sister's phone. I cannot say much. If I stop writing, please do not assume anything. Please assume everything. Do you understand? I think you understand."],
+		"helped": 0,
+		"options": [
+			{"k": "investigate", "label": "Request the trial protocol", "dis": 14,
+			 "res": "The protocol exists, signed three days after your shipment approval. The consent section reads \"to be addressed locally.\" It was addressed locally. The nurse who addressed it is named in the file."},
+			{"k": "accept", "label": "Accept the compliance memo", "dis": 3,
+			 "res": "Observational data. Reporting standards. The words are professional, and professionalism is a kind of warmth. You close the tab gently, as if it might wake."},
+			{"k": "escalate", "label": "Escalate to Ethics", "dis": 8,
+			 "res": "Ethics confirms the matter is under review by the same department running the study. You are thanked for your vigilance."},
+		],
+	},
+	{
+		"id": "memo", "act": 2, "from": "Leaked Document",
+		"title": "Leaked Memo · Dray, Civil Society",
+		"body": "An activist's memo, forwarded without comment. It alleges Concord funded and advised the Provincial Guard when it dissolved Kessara's elected council, to guarantee the resource contracts. It includes wire references. Corporate Communications has already called it \"a forgery by a known agitator.\"",
+		"fine": "Wire ref KPG-2291 — Counterparty: Provincial Guard Logistics. Approver: Regional Director. Cost center: Development Outreach.",
+		"msg": ["Jun", "uncle says the soldiers came and the council is gone. he says we have to be quiet now. I am being quiet. I am telling the goats. is that okay?"],
+		"helped": 0,
+		"options": [
+			{"k": "investigate", "label": "Trace the wire reference", "dis": 14,
+			 "res": "The cost center is the one that paid for your Q2 team retreat. The wire sits three lines above the catering invoice. You know the name of the hotel."},
+			{"k": "accept", "label": "Accept the Communications statement", "dis": 3,
+			 "res": "A known agitator. You write the phrase twice, to see if it sticks. It sticks. That is the unsettling part."},
+			{"k": "escalate", "label": "Escalate to Ethics", "dis": 8,
+			 "res": "Ethics replies that the matter is outside its scope, as the funds were classified as Outreach. You are thanked for your engagement."},
+		],
+	},
+	{
+		"id": "lantern", "act": 2, "from": "Colleague · Hollis",
+		"title": "File · Project LANTERN",
+		"body": "A colleague slides a thin file onto your desk and leaves without a word. LANTERN is a ten-year plan: loans, shipments, contracts and grants, sequenced by a model that predicts which villages will default, which clinics will fold, which councils will bend. Your approvals are in the appendix. You were not meant to be the author. You were meant to be the instrument.",
+		"fine": "Appendix F — \"Officer discretion: modeled as noise. No material effect on outcomes.\"",
+		"msg": ["Amara", "Teo has not written in nine days. The clinic is shut. Someone says soldiers, someone says a fever. The children ask me why I look at the window. I told them I am waiting for a delivery."],
+		"helped": 0,
+		"options": [
+			{"k": "investigate", "label": "Read the whole appendix", "dis": 16,
+			 "res": "Officer discretion: modeled as noise. You flip back through your decisions and see that even the ones you refused were in the model. You were never choosing. You were being forecast."},
+			{"k": "accept", "label": "Treat it as confidential strategy", "dis": 3,
+			 "res": "A growth plan. Of course there is a growth plan. You put it in the drawer, where it hums."},
+			{"k": "escalate", "label": "Return it to Hollis", "dis": 8,
+			 "res": "Hollis smiles with a tenderness you did not expect. \"You've been good for the region,\" he says, and you realize it is the kindest thing anyone has said to you in a year."},
+		],
+	},
+	{
+		"id": "marek", "act": 2, "from": "Compliance · Marek V.",
+		"title": "Private Call · Marek V., Compliance",
+		"body": "A man from Compliance asks to meet in the stairwell. He has been copying documents for a year. He will go public with everything: the clauses, the trial, the wires, LANTERN. He needs one thing: a record of your approvals, the ones with your name on them. Without them he has a story. With them he has a case.\n\nHe says: \"I'm not asking you to be brave. I'm asking you to be present.\"",
+		"fine": "Marek, at the end of the call: \"They will offer you something before I publish. Look at what it costs.\"",
+		"msg": ["Dr. Teo", "If this message arrives, the one on my sister's phone worked. Tell the children at Amara's school the nurse says hello. Tell Jun to keep naming the goats. I am not afraid. I wish I could say I was."],
+		"helped": 0,
+		"options": [
+			{"k": "investigate", "label": "Give him your records", "dis": 14,
+			 "res": "He thanks you. His voice is very steady. You understand that he has been steady for a year so that someone else could afford not to be."},
+			{"k": "accept", "label": "Say you will think about it", "dis": 4,
+			 "res": "You say that you will think about it. He nods like a man who knows what the thinking will become. He writes his number on a napkin. You keep the napkin."},
+			{"k": "escalate", "label": "Report the approach to Security", "dis": 10,
+			 "res": "Security thanks you for your loyalty. You are walked back to your desk with a courtesy you did not ask for. There is a new plant on it."},
+		],
+	},
+]
+
+# ───────────────────────── ACT III ─────────────────────────
+const FINAL := {
+	"title": "Authorization 77-K",
+	"body": "The offer arrives on your desk as an elegant, short document. It retroactively ratifies every loan, shipment and contract with your name on it as \"compliant with all applicable standards,\" and consolidates Concord's authority over Kessara for another decade. Marek publishes tomorrow either way.\n\nIf you sign, the past is sealed and the region is managed. If you refuse, Marek's leak will bring the board down on the aid wing, and the aid wing is how most of Kessara eats. If you leak your own records first, Security will find you before the morning.\n\nThere is no fourth option. There is a pen.",
+	"options": [
+		{"k": "sign", "label": "Sign 77-K"},
+		{"k": "refuse", "label": "Refuse, and let Marek publish"},
+		{"k": "leak", "label": "Leak everything yourself, tonight"},
+	],
+}
+
+# Last messages from the pen pals, per route.
+const LAST_MESSAGES := {
 	"sign": {
-		"title": "PROMOTION",
-		"epilogue": "Six months later, you're promoted to Vice President of Regional Operations. The office in Kessara City is palatial. The ticker counts 500,000 lives improved. The photos on your desk show the Regional Governor cutting ribbons at ceremonies. Meridian Concord's flag flies over the water treatment plants, schools, and hospitals. You receive occasional updates from the field: productivity is up. Opposition has been 'managed.' You don't read the longer reports. There's a framed photo on your desk of you at the groundbreaking for the water project. You look happy. You rarely touch it.",
-		"message_label": "ENDING: YOU SIGNED THE AUTHORIZATION"
+		"Amara": "Dear friend. The school has reopened under the new Pathways. All the children are here, and no one looks out the window. Letters now go through the Regional Desk, so I will keep this short and happy. We are well. We are grateful. We are well.",
+		"Dr. Teo": "[no message. Status: reassigned, location restricted.]",
+		"Jun": "hi!! the new dam is so big. uncle says our valley will be under it by spring. the goats are going to a farm somewhere. I am not sure how I know they are not. please say hi to Loan and Interest for me",
 	},
 	"refuse": {
-		"title": "EXILE",
-		"epilogue": "You refused the authorization and Meridian fired you immediately. Corporate security locked you out of the building. Your name was leaked to the press as a 'disgruntled employee spreading lies.' By evening, activist groups claimed you as a whistleblower. By next morning, Meridian's lawyers demanded you sign an NDA, threatening to destroy your career. You signed. You couldn't talk. But someone leaked the documents anyway—the full blueprint. The story broke globally. Meridian faced investigations. But in Kessara, the regime you warned of was already taking hold. The Regional Governor's militia consolidated power. You were blamed. Activists who had wanted to trust you felt betrayed for not leaking the documents yourself. You live in a small apartment in another country, unable to return home, unable to speak. You watch documentaries about Kessara. In one, a survivor describes the regime's rise. You recognize the path you tried to stop.",
-		"message_label": "ENDING: YOU REFUSED THE AUTHORIZATION"
+		"Amara": "The school has closed. Concord is gone, and with it the teachers, the books, the bread. I am boiling what we have. I am not angry. I want you to know I understand why you did what you did.",
+		"Dr. Teo": "Supplies ran out Thursday. We have the machine and nothing to put into it. An ultrasound is just a very polite mirror. I am staying.",
+		"Jun": "we are walking to the border. dad has the goats on a rope. I am typing on a stranger's phone. if you get this please tell me it was worth it. I want it to have been worth it. I am eleven.",
 	},
 	"leak": {
-		"title": "DISAPPEARED",
-		"epilogue": "You copied everything and sent it to journalists and activist groups. Then you walked into Meridian's lobby and confessed. Security held you while lawyers arrived. You spent three years in a detention facility in Kessara—technically a 'holding area' for people of interest. The regime had taken control and saw you as a threat. You were tortured with questions about who helped you leak. You didn't talk. After two thousand days, there was a prisoner exchange. You were traded for political assets. You were released to an international facility. Years later, you're living in a sparse apartment, watching documentaries. You see footage of the schoolteacher arrested. The nurse vanished. The teenager leading a resistance cell. The documents you leaked did reach the world. Investigations continue. But Kessara is a failed state now, run by the militia. Your leak saved some lives. But the region burns. You were the instrument of truth. And truth alone did not stop the harm—your good intentions were the mechanism that enabled it all.",
-		"message_label": "ENDING: YOU LEAKED THE DOCUMENTS"
+		"Amara": "They say you disappeared. I have hidden your picture, the one the children drew, inside the school stove. The warlords took the roof. I am teaching from the doorway. We are learning the names of the stars.",
+		"Dr. Teo": "[no message. The clinic was burned on the third night. Staff list unaccounted.]",
+		"Jun": "[photo attached: a goat, looking out the back window of a bus. No text.]",
 	},
 }
 
-const NARRATOR_LINES = {
-	"pragmatist_early": [
-		"Humanitarian work is complicated. All choices help someone.",
-		"You're doing more good than most people ever will.",
-		"The margins of profit are what fund the margins of help.",
+const ENDINGS := {
+	"sign": {
+		"title": "THE PROMOTION",
+		"text": "You are promoted. The ceremony has a cake, and the cake has your name on it in blue icing.\n\nThe quarterly film is cheerful. The region is described as \"stabilized.\" There are drone shots of the long straight roads, and for three seconds a woman at a market stall, smiling, who may have been anyone.\n\nOn your desk is a framed drawing: a very large man in a tie standing beside a well. You turn it to face the wall. Then you turn it back, because you cannot stand to not look.\n\nLetters from Kessara keep arriving, but they have begun to sound alike. They are polite. They are grateful. They have been edited.",
+	},
+	"refuse": {
+		"title": "THE SCAPEGOAT",
+		"text": "Marek's leak is complete and then, within a week, it is wrong. The version that spreads leaves out the clauses, the trial, the wires. It keeps your name.\n\nConcord announces an independent review, which finds a mid-level administrator who misused his discretion. The board resigns with generous severance. The aid wing is dissolved \"to prevent recurrence.\" You are the recurrence.\n\nYou live under another name in another country, and you scroll through memorial pages late at night. You recognize some of the faces. You recognize them from photographs they sent you with the message: thank you for listening.",
+	},
+	"leak": {
+		"title": "THE DISAPPEARANCE",
+		"text": "Security finds you at dawn. There is no violence. There is a car, and a room, and a long period during which no one tells you anything.\n\nYears later you are released in a prisoner exchange, thin and quiet, onto a runway under a cold sky. The region you tried to warn has become a failed state governed by arms dealers, and the documentaries about it are very well made.\n\nIn your sparse apartment you watch them, one after another. Narrators explain how it happened. They all say the same thing. No one mentions you, and you can't decide whether that is mercy.",
+	},
+}
+
+const CODA := "You did not fail because you were evil. You failed because the system took your care and used it as a tool. Your good intentions were the mechanism of harm."
+
+# ───────────────────────── Narration ─────────────────────────
+# Phase 0 = confident, 1 = cracks, 2 = aware.
+const NARRATOR := {
+	"pragmatist": [
+		["Real people, real water. The paperwork is just how good things get done.",
+		 "The numbers are good. I don't need to feel good about them; I need them to be good."],
+		["If I hadn't signed, someone worse would have. That's not an excuse. That's arithmetic.",
+		 "Every system has friction. That does not make the system the enemy."],
+		["Arithmetic. I keep saying that word. It stopped meaning anything a few files ago.",
+		 "I used to think a good outcome was a number. I can't find the number that includes them."],
 	],
-	"pragmatist_late": [
-		"You knew the consequences. You chose anyway.",
-		"Good intentions pave many roads.",
-		"The mechanism of your care was the mechanism of harm.",
+	"idealist": [
+		["I am helping. I can feel it in my hands. That is a real thing.",
+		 "This is how change happens: someone inside, doing a little more than they must."],
+		["There are problems, yes. But problems are what I'm here to fix. I'll fix them next quarter.",
+		 "If I leave, the next person won't care. I have to stay. I have to."],
+		["I thought being inside would make me an inside voice. I was only ever inside.",
+		 "I told myself I was bending the system. It was bending me. I called it growth."],
 	],
-	"idealist_early": [
-		"Every life you touch is a victory.",
-		"Meridian Concord sees what others miss: humanity's potential.",
-		"You are the bridge between hope and help.",
-	],
-	"idealist_late": [
-		"They used your idealism like a tool.",
-		"You wanted to save people. You saved the system that enslaved them.",
-		"Hope is the cruelest weapon when wielded by those who profit from despair.",
-	],
-	"cynic_early": [
-		"It's all extraction, just with better optics.",
-		"You know what this is. Might as well be honest about it.",
-		"Everyone's complicit. At least you're useful.",
-	],
-	"cynic_late": [
-		"You were cynical about the wrong things.",
-		"You thought you were smarter than the system. The system was smarter than you.",
-		"Cynicism is just a mask for guilt.",
+	"cynic": [
+		["I know how these places work. I'm not surprised. Being unsurprised is not the same as being innocent.",
+		 "Everyone's got an angle. At least I'm honest about mine."],
+		["I told myself I'd seen it coming. I did. That didn't help anyone.",
+		 "Cynicism is just guilt that has learned to shrug."],
+		["I saw it coming. I filed it anyway. What does it mean to see something and sign it?",
+		 "I wanted to be the one who knew. I did not want to be the one who did."],
 	],
 }
+
+# Colleagues you can talk to. Lines per phase 0/1/2.
+const COLLEAGUES := {
+	"Dana": {"role": "Director of Impact Storytelling", "color": Color(0.85, 0.35, 0.30), "lines": [
+		["Have you seen the new numbers? We crossed fifty thousand lives. FIFTY. Thousand. I'm going to cry in the elevator.",
+		 "We're not a company, we're a movement with a very good dental plan."],
+		["Fifty thousand. Sixty. I've stopped counting; the dashboard counts for me. Is that a bad sign?",
+		 "Do you ever feel like the photographs are getting younger? I think I'm approving younger photographs."],
+		["I used to write stories. Now I edit them. There's a difference and I stopped looking for it.",
+		 "If you hear me laughing at the printer, don't come check on me."],
+	]},
+	"Pritch": {"role": "Junior Analyst, Regional Desk", "color": Color(0.30, 0.55, 0.85), "lines": [
+		["First week! Everyone's so nice. Is it normal that the break room has a fountain? Like a real fountain?",
+		 "They told me we're helping villages. I have a spreadsheet of villages. They look so tidy in a spreadsheet."],
+		["I keep finding the same words in the contracts. 'Material delay.' 'Aligned.' They are not words, they are handles.",
+		 "I asked a question in the meeting and Hollis wrote it down. He wrote it down so kindly. I haven't been asked anything since."],
+		["I am training the model on you, you know. Your approvals. Do you want me to stop? I can't stop. Do you want me to?",
+		 "I don't have any questions anymore. Isn't that wonderful?"],
+	]},
+	"Sol": {"role": "Senior Underwriter", "color": Color(0.60, 0.50, 0.30), "lines": [
+		["Take it from a veteran: you can't save the world. You can save a quarter. Save the quarter.",
+		 "The trick is not to read the fine print. The fine print is for the other side."],
+		["I read the fine print once. In '09. It gave me a good decade of drinking.",
+		 "You've got the look. You've started to read it. Stop reading it. It doesn't change anything and it ruins your sleep."],
+		["You do know that none of us is good, right? I mean no one. That's the point of a good system.",
+		 "Whatever you decide, do it fast. The not-deciding is the worst part. I would know."],
+	]},
+	"Hollis": {"role": "Regional Director", "color": Color(0.35, 0.35, 0.40), "lines": [
+		["You're doing wonderful work. Wonderful. I tell the board your name.",
+		 "I know it's not easy, caring this much. The world needs more people who care this much."],
+		["I've noticed you've been pulling a lot of files lately. That's wonderful. Curiosity is a corporate value.",
+		 "You and I are the same, you know. We care. The caring is why they let us stay."],
+		["You've been good for the region. I want you to hear that. Whatever else happens, hear that.",
+		 "I wonder what it would feel like to be told I'd done something wrong. I think I'd be relieved."],
+	]},
+}
+
+# Posters: arrays of three phrasing phases. {n} is replaced with lives helped.
+const POSTERS := [
+	["IMPACT\n{n} LIVES HELPED", "IMPACT\n{n} LIVES HELD", "EXTRACTION\n{n} ACCOUNTS ACQUIRED"],
+	["PARTNERSHIP\nIS OUR PROMISE", "PARTNERSHIP\nIS OUR TERMS", "DEPENDENCE\nIS OUR PRODUCT"],
+	["LISTEN.  LEARN.  LEAD.", "LISTEN.  LEARN.  LEASE.", "LISTEN.  LOG.  LIQUIDATE."],
+	["WE ARE\nALL IN THIS TOGETHER", "WE ARE\nALL IN THIS", "WE ARE\nALL IN."],
+]
+
+const WINDOW_NOTES := [
+	"The city is lit and orderly. Somewhere beyond it, a country you have never visited is waiting for your signature.",
+	"The skyline looks the same. You are the thing that has changed, and you are not sure when.",
+	"The city glass is a mirror now. You can see the office, and one tired administrator in it.",
+]
