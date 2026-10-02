@@ -47,6 +47,8 @@ func _ready() -> void:
 	GameState.phase_changed.connect(_on_phase_changed)
 	if autotest:
 		_run_autotest.call_deferred()
+	elif "--tour" in OS.get_cmdline_user_args():
+		_run_tour.call_deferred()
 	_start.call_deferred()
 
 # ───────────────────────── story flow ─────────────────────────
@@ -363,7 +365,7 @@ func _poster(pos: Vector3, yaw_deg: float, idx: int) -> void:
 	_box(pos, Vector3(3.8, 1.8, 0.08) if wide_x else Vector3(0.08, 1.8, 3.8), Color(0.10, 0.10, 0.12), false)
 	var l := Label3D.new()
 	l.font_size = 72
-	l.pixel_size = 0.0042
+	l.pixel_size = 0.0034
 	l.outline_size = 8
 	l.outline_modulate = Color(0, 0, 0, 0.9)
 	l.rotation_degrees.y = yaw_deg
@@ -600,4 +602,107 @@ func _run_autotest() -> void:
 	await get_tree().create_timer(9.0).timeout
 	await _shot("07_ending")
 	print("AUTOTEST OK  route=%s lives=%d investigated=%d" % [GameState.route, GameState.lives_helped, GameState.investigated])
+	get_tree().quit()
+
+# ───────────────────────── scripted tour (screenshots + video) ─────────────────────────
+# godot --path . --write-movie tour.avi --fixed-fps 30 -- --tour
+
+func _wait(s: float) -> void:
+	await get_tree().create_timer(s).timeout
+
+func _walk(pos: Vector3, yaw_t: float, pitch_t: float, secs: float) -> void:
+	var p0 := player.position
+	var y0 := yaw
+	var x0 := pitch
+	var t := create_tween()
+	t.tween_method(func(k: float):
+		player.position = p0.lerp(pos, k)
+		yaw = lerp_angle(y0, yaw_t, k)
+		pitch = lerpf(x0, pitch_t, k)
+		player.rotation.y = yaw
+		cam.rotation.x = pitch, 0.0, 1.0, secs)
+	await t.finished
+
+func _answer(idx: int, hold: float) -> void:
+	while not ui.page_active:
+		await get_tree().process_frame
+	while ui.revealing:
+		await get_tree().process_frame
+	await _wait(hold)
+	ui.answered.emit(idx)
+	await _wait(0.4)
+
+func _tour_case(picks: Array, holds: Array) -> void:
+	_use_terminal.call_deferred()
+	await _answer(0, holds[0])
+	await _answer(picks[0], holds[1])
+	await _answer(0, holds[2])
+	await _wait(0.5)
+
+func _run_tour() -> void:
+	await _wait(2.5)
+	await _shot("t01_title")
+	await _wait(1.0)
+	(get_tree().get_nodes_in_group("style_buttons")[1] as Button).pressed.emit()
+	await _wait(5.5)
+	player.position = Vector3(0, 0.95, 8.2)
+	yaw = 0.0
+	await _shot("t02_arrival")
+	await _walk(Vector3(-0.5, 0.95, 4.0), 0.5, -0.05, 4.0)
+	await _shot("t03_pods")
+	await _walk(Vector3(-2.5, 0.95, 6.2), PI + 0.4, 0.0, 3.5)     # to Dana and the poster wall
+	await _shot("t04_dana_poster")
+	_talk.call_deferred("Dana")
+	await _wait(1.0)
+	await _shot("t05_dana_dialog")
+	await _wait(2.5)
+	ui._skip.emit()
+	await _wait(0.6)
+	await _walk(Vector3(-11.0, 0.95, 5.5), PI + 1.2, 0.0, 4.5)    # break room
+	await _shot("t06_breakroom")
+	_cooler()
+	await _wait(2.0)
+	await _shot("t07_cooler_toast")
+	await _walk(Vector3(8.2, 0.95, -4.8), -0.3, -0.1, 7.0)        # to the terminal
+	await _shot("t08_terminal_approach")
+	await _tour_case([0], [2.5, 4.5, 3.5])
+	await _shot("t09_after_case1")
+	for i in 5:                                                   # rest of Act I, quickly
+		await _tour_case([i % 3], [0.5, 1.2, 1.5])
+	await _wait(3.0)                                              # Act II card passes
+	await _shot("t10_act2_office")
+	await _tour_case([0], [2.0, 5.0, 4.5])                        # famine: investigate
+	await _shot("t11_after_famine")
+	for i in 4:
+		await _tour_case([[0, 2, 0, 0][i]], [0.5, 1.5, 3.0])
+	await _wait(3.5)
+	await _shot("t12_late_terminal")
+	await _walk(Vector3(5.0, 0.95, -6.5), 0.3, 0.05, 3.0)
+	_look_out()
+	await _wait(2.0)
+	await _shot("t13_window_late")
+	await _walk(Vector3(2.0, 0.95, 4.5), PI - 0.3, 0.05, 5.0)    # back past the mutated posters
+	await _shot("t14_posters_late")
+	await _walk(Vector3(-2.0, 0.95, 0.5), 0.9, -0.05, 4.0)
+	await _shot("t15_pods_late")
+	_talk.call_deferred("Hollis")
+	player.position = Vector3(10.5, 0.95, 4.5)
+	await _wait(1.0)
+	await _shot("t16_hollis_late")
+	await _wait(2.5)
+	ui._skip.emit()
+	await _wait(0.6)
+	await _walk(Vector3(8.2, 0.95, -4.8), 0.0, -0.1, 4.0)
+	_use_terminal.call_deferred()
+	await _wait(0.8)
+	await _shot("t17_final_prompt")
+	while ui.revealing:
+		await get_tree().process_frame
+	await _shot("t18_final_options")
+	await _wait(2.5)
+	ui.answered.emit(0)                                           # sign
+	await _wait(9.0)
+	await _shot("t19_ending")
+	await _wait(5.0)
+	print("TOUR OK")
 	get_tree().quit()
