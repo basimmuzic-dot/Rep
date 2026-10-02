@@ -1,8 +1,8 @@
 extends Node3D
 ## Main game controller: builds environment, handles player, UI, and progression
 
-@onready var camera: Camera3D = Camera3D.new()
-@onready var player: CharacterBody3D = CharacterBody3D.new()
+var camera: Camera3D
+var player: CharacterBody3D
 
 var player_velocity: Vector3 = Vector3.ZERO
 var player_speed: float = 7.0
@@ -215,10 +215,12 @@ func build_office_environment() -> void:
 			office_lights.append(light)
 
 func setup_player() -> void:
+	player = CharacterBody3D.new()
 	player.name = "Player"
 	player.position = Vector3(0, 1, 10)
 	add_child(player)
 
+	camera = Camera3D.new()
 	camera.name = "Camera3D"
 	camera.position = Vector3(0, 0.6, 0)
 	player.add_child(camera)
@@ -368,7 +370,7 @@ func open_case_file() -> void:
 		button.text = choice_text
 		button.custom_minimum_size = Vector2(400, 40)
 		button.modulate = Color.BLACK
-		button.pressed.connect(_on_choice_pressed.bindv([i, choice_text]))
+		button.pressed.connect(func(): _on_choice_pressed(i, choice_text))
 		choice_container.add_child(button)
 		choice_buttons.append(button)
 
@@ -388,7 +390,12 @@ func _on_choice_pressed(choice_index: int, choice_text: String) -> void:
 		GameState.modify_dissonance(case_data.get("dissonance_delta", [0, 0])[0])
 
 	if case_data.get("id") == "final_authorization":
-		GameState.set_ending_route(choice_text)
+		var ending_key = "refuse"
+		if "SIGN" in choice_text:
+			ending_key = "sign"
+		elif "LEAK" in choice_text:
+			ending_key = "leak"
+		GameState.set_ending_route(ending_key)
 		GameState.trigger_ending()
 	else:
 		# Update pen pals
@@ -558,7 +565,7 @@ func show_playstyle_selection() -> void:
 		button.anchor_right = 0.4 + i * 0.25
 		button.anchor_bottom = 0.7
 		button.modulate = Color.WHITE
-		button.pressed.connect(_on_playstyle_selected.bindv([playstyles[i], selection_panel]))
+		button.pressed.connect(func(): _on_playstyle_selected(playstyles[i], selection_panel))
 		selection_panel.add_child(button)
 
 func _on_playstyle_selected(style: String, panel: Control) -> void:
