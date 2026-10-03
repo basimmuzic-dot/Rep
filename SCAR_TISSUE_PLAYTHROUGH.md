@@ -176,13 +176,13 @@
 **IF the player picks up the surgical tools and begins the surgery** → **Severance.**
 - The surgery is a hands-on procedure; its success depends on the surgical skill and steadiness built across the game (callus, steady hands, scars).
   - IF successful → cuts the final cord; the room dims. **ENDING 1 OF 3: SEVERANCE.** Mara carries Nell's pain **[SCAR: Nell's Pain]**.
-  - IF it fails (tremor, untreated hands) → complication; the player may retry from the Threshold checkpoint.
+  - IF it fails (tremor, untreated hands) → the cord is **stabilised, not lost**; the player may retry immediately, with no penalty. An elbow-brace aid is always available, so no scar locks the player out.
 
 **IF the player lies down on the platform beside Nell** → **Vessel.**
 - **ENDING 2 OF 3: VESSEL.** Mara stays; Nell walks out. **[SCAR: Shared Pulse]**.
 
 **IF the player stays still, speaks calmly, and treats the Chorus's wounds** → **Release** *if the threshold is met.*
-- Requires `CARE ≥ 70%` **and** `SOOTHED ≥ 1` (Wards 2–4).
+- Requires (`CARE ≥ 70%` **and** `SOOTHED ≥ 1` in Wards 2–4) **or** (`CARE ≥ 50%` **and** the **Bedside Care** sequence completed here; Nell teaches it in plain words, so no earlier tape is needed).
   - IF met → **ENDING 3 OF 3: RELEASE.** Mara walks out with Nell. **[SCAR: Clean Hands]**.
   - **ELSE** → the Chorus does not settle; the player is told *"The Chorus does not trust you yet"* and offered the Chapter Select hint (*earliest ward where care dropped*). They can retry, or pick Severance or Vessel.
 

@@ -64,7 +64,7 @@ The tracker used by Release is already in the entity spec as "Care Resonance." M
 
 - **What counts:** wounds treated cleanly (bandaged or splinted without a failed attempt), wounds treated while the Understudy is nearby, rescuing Tomas, and moments of stillness near the Understudy that settled it.
 - **What doesn't:** rushing treatment, leaving wounds open to complication, fleeing past the Understudy while it was calm.
-- **Threshold:** at least **70%** of wounds treated well *and* at least one SOOTHED encounter in Wards 2–4.
+- **Threshold:** at least **70%** of wounds treated well *and* at least one SOOTHED encounter in Wards 2–4. **Fairer alternative:** at least **50%** *and* completing the **Bedside Care** sequence in the Chorus Room (treating the Chorus's own wounds with remaining supplies), which adds directly to the score. The Chorus Room itself teaches the idea (Nell: *"They only want to be held"*), so no earlier tape is required.
 - **Visibility:** the Chapter Select screen shows the current score as a **plain fraction** ("13 of 17 wounds treated well"), never as a hidden meter. Players should know where they stand.
 
 This keeps the system fair: nobody misses the best ending without a way to find out why and fix it.

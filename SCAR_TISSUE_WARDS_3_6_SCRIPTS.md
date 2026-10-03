@@ -156,6 +156,13 @@ She opens her eyes slowly. Her voice comes in two layers: her own, clear, and a 
 >
 > **MARA:** *"That's… what we do. Surgeons. That's what we—"* *(She stops.)* *"That's what I was trying to do all along."*
 
+## Nell Teaches (so no earlier tape is required)
+> **NELL:** *"They only want to be held. Dr. Henn used to say: be gentle. It's the only thing that ever worked."*
+> *(She lifts one hand toward the cords above her. Some are frayed, some burned.)*
+> **NELL:** *"They're hurt too. If you want to help them, you can start there."*
+
+*(This opens the Bedside Care sequence: Mara may treat the Chorus's own wounds with any remaining supplies. See `SCAR_TISSUE_TRADEOFFS.md` §8.)*
+
 ## Nell Asks
 > **NELL:** *"I'm tired, Mara. Not sick. Just tired. I think we all are. I don't know what's right. You're the doctor. What do you want to happen?"*
 

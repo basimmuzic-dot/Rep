@@ -32,7 +32,7 @@
 
 ### Octalysis profile
 - **White Hat (dominant):** CD1 Meaning (finding the patient, uncovering the truth), CD2 Accomplishment (surgical skill growth), CD3 Creativity (improvised treatments, compensation strategies).
-- **Black Hat (constrained):** CD8 Loss & Avoidance (the core tension), CD7 Unpredictability (the entity's behavior), CD6 Scarcity (limited supplies, but always enough to survive a careful run).
+- **Black Hat (constrained):** CD8 Loss & Avoidance (the core tension), CD7 Unpredictability (the entity's behavior), CD6 Scarcity (supplies are enough to survive, not to be perfect; see `SCAR_TISSUE_TRADEOFFS.md`).
 - CD4 Ownership: your scarred body and chosen prosthetics. CD5 is minimal by design.
 
 ---
