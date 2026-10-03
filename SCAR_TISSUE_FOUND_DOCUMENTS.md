@@ -113,4 +113,4 @@
 6. **Audio logs are never the only carrier of a critical beat.** A visual or environmental echo must always accompany it.
 
 ## Totals
-~56 items: ~32 critical, ~24 optional. Estimated find-everything run: 11–12 hours; main-path-only run: 8–9 hours.
+56 items: 40 critical, 16 optional. Estimated find-everything run: 11–12 hours; main-path-only run: 8–9 hours.

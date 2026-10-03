@@ -61,7 +61,7 @@ A long polished desk with a cracked glass partition above it. A brass bell, a ra
 Rows of tall steel filing cabinets, drawers hanging open like jaws, paper spilling to the floor in drifts. One aisle is *tidy*: drawers closed, labels straight. The dust on the floor holds a trail of narrow footprints leading in and none leading out. At the end of the aisle, a green banker's lamp lies on its side. A single cabinet drawer is open, labelled **V**.
 
 ### Staff Corridor
-A long, narrow corridor with a linoleum floor the colour of old mustard. Doors on both sides: *Dispensary, Linen, Night Sister, Dr. Henn.* The last is locked. Water drips steadily from the ceiling into a pail. At the far end, a fire door with a wire-glass panel, light shimmering green through it.
+A long, narrow corridor with a linoleum floor the colour of old mustard. Doors on both sides: *Dispensary, Linen, Night Sister, Administrator.* The last is locked. Water drips steadily from the ceiling into a pail. At the far end, a fire door with a wire-glass panel, light shimmering green through it.
 
 ### Waiting Room (side room)
 Rows of wooden chairs, all facing the same wall, where a framed photo of the staff hangs. Every face in the photograph has been scratched out except two: a girl of about nine, and a young man in an orderly's coat (Tomas).
@@ -158,7 +158,7 @@ Gentle and unbearable. The ward is not frightening in a loud way. It is a place 
 
 **Mood:** heat, guilt, labour.
 
-Descend through a maintenance hatch into the building's deepest working level.
+Reached by the spiral service stair that winds down the Mirror Ward's warm shaft, past the dark floors, to the building's deepest working level. The warmth rising in the shaft is the boilers' heat.
 
 ### The Furnace Hall
 A cavernous space of **blackened brick** and iron, forty feet high. Three vast boilers sit in a row, riveted steel as large as railway engines, still faintly warm. Soot is everywhere, lying thick and soft on every surface, so the player's footprints and handprints stay visible. Orange light comes from a single boiler whose firebox door is open and still holds a low, **steady glow** that has no right to be burning. Heat bends the air.

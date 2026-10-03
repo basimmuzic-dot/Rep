@@ -88,7 +88,7 @@ The Understudy steps aside, clearing the doorway. The shaft in the floor glows f
 
 ## Beat 8 — Exit
 
-The only way onward is down the shaft, a spiral service stair around the warm dark. As Mara leaves, the lamp at the end of the ward goes out. In the dark mirrors, the player's reflection stands still for one second longer than it should, then follows.
+The only way onward is down the shaft, a spiral service stair around the warm dark. It descends floor after floor to the boiler house, whose heat is what rises through the shaft. (Tomas's radio call, which follows, sends her the rest of the way.) As Mara leaves, the lamp at the end of the ward goes out. In the dark mirrors, the player's reflection stands still for one second longer than it should, then follows.
 
 **Closing line (Mara):** *"I'm coming, Nell. I'm sorry it took so long."*
 

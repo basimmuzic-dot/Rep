@@ -30,7 +30,7 @@
 
 She finds the jar labelled **VOSS, N.** It is **empty**, but its fluid is faintly warm.
 
-## The Gallery — First Understudy Encounter
+## The Gallery — The Understudy Close Up (first time with glass between them)
 The Understudy stands in the theatre below, in the lamplight, facing the table. Mara, above, behind glass. It raises its hand. She is holding her own hand up without knowing why. The glass between them is the only barrier.
 
 **Mara (whisper):** *"You're not copying me. You're… listening."*
