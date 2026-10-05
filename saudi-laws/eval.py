@@ -16,7 +16,7 @@ CASES = [  # (query, substring of the law title that should appear in the top k)
 def run(k=5):
     hit = 0
     for q, want in CASES:
-        laws = [r["law"] for r in kb.search(q, k=k)]
+        laws = [r["law"] for r in kb.search(q, k=k) if "law" in r]
         ok = any(want in l for l in laws)
         hit += ok
         if "-v" in sys.argv or not ok:

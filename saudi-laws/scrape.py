@@ -38,6 +38,13 @@ def fetch(url, tries=4):
 NOISE_RE = re.compile(r"^(عدد مرات التصفح\s*\d*|طلب اشعار|تعديلات المادة|نبذة عن النظام"
                       r"|مادة معدلة|مادة ملغية|اصل الوثيقة|طباعة|الملاحظات والتعليقات|الإصدارات|اللغات)$")
 _folder_index = None
+STATUS_RE = re.compile(r"^\s*الحالة\s*\n+\s*(\S[^\n]*)", re.M)
+
+
+def extract_status(text):
+    """The law page's 'الحالة' field: ساري / لاغي / جاري العمل على النظام / ساري بعد مدة ..."""
+    m = STATUS_RE.search(text)
+    return m.group(1).strip() if m else ""
 
 
 def regulation_links(title):
@@ -146,6 +153,7 @@ def scrape(url, seen, queue, follow_related):
     if len(text) < 200:  # site error / empty detail page ("عذراً، لقد حدث خطأ", "التفاصيل")
         seen.discard(lid)
         raise RuntimeError(f"empty or error page ({len(text)} chars)")
+    status = extract_status(text)
     title = (p.title.split("|")[0].strip() or text.split("\n", 1)[0])[:200]
     kind = "لائحة" if re.search(r"لائح", title) else "نظام"
     if follow_related:  # implementing regulations etc. are linked from the law page
@@ -155,12 +163,16 @@ def scrape(url, seen, queue, follow_related):
     text = re.sub(r"\A(?:\s*" + re.escape(title) + r"\s*\n)+", "", text)  # page repeats the title
     arts = split_articles(text)
     (OUT / "laws").mkdir(parents=True, exist_ok=True)
-    write_md({"id": lid, "title": title, "type": kind, "source": url}, arts)
+    write_md({"id": lid, "title": title, "type": kind, "source": url, "status": status,
+              "retrieved": time.strftime("%Y-%m-%d")}, arts)
 
 
 def write_md(meta, arts):
-    md = [f"---\nid: {meta['id']}\ntitle: {meta['title']}\ntype: {meta['type']}\nsource: {meta['source']}\n---\n",
-          f"# {meta['title']}\n"]
+    status = meta.get("status", "")
+    md = [f"---\nid: {meta['id']}\ntitle: {meta['title']}\ntype: {meta['type']}\nsource: {meta['source']}\n"
+          f"status: {status}\nretrieved: {meta.get('retrieved', '')}\n---\n", f"# {meta['title']}\n"]
+    if status != "ساري":  # make non-binding texts impossible to miss
+        md.append(f"> ⚠️ الحالة: {status or 'غير معروفة'} — ليس نظامًا ساريًا؛ لا يُعتمد عليه دون التحقق من المصدر.\n")
     md += [f"## {label}\n\n{body}\n" for label, body in arts]
     (OUT / "laws").mkdir(parents=True, exist_ok=True)
     (OUT / "laws" / f"{meta['id']}.md").write_text("\n".join(md), encoding="utf-8")
@@ -170,13 +182,17 @@ def read_md(path):
     """-> (front-matter dict, text after the '# title' line)"""
     _, fm, rest = path.read_text(encoding="utf-8").split("---\n", 2)
     meta = dict(l.split(": ", 1) for l in fm.strip().splitlines() if ": " in l)
-    return meta, rest.strip().split("\n", 1)[1] if "\n" in rest.strip() else ""
+    rest = rest.strip().split("\n", 1)[1] if "\n" in rest.strip() else ""
+    return meta, re.sub(r"\A\s*> ⚠️[^\n]*\n", "", rest)  # drop the status banner
 
 
 def resplit():
     """Offline: re-run article splitting over the saved .md files (no network)."""
     for path in sorted((OUT / "laws").glob("*.md")):
         meta, rest = read_md(path)
+        if not meta.get("status"):  # files saved before status was captured: it is in the page header text
+            meta["status"] = extract_status(rest)
+            meta["retrieved"] = time.strftime("%Y-%m-%d", time.localtime(path.stat().st_mtime))
         rest = re.sub(r"^## (?:النص(?: \(\d+\))?|الديباجة)[ \t]*$", "", rest, flags=re.M)  # synthetic headings
         rest = re.sub(r"^## ", "", rest, flags=re.M)  # real article headings become heading lines again
         rest = "\n".join(l for l in rest.split("\n") if not NOISE_RE.match(l.strip()))
@@ -192,7 +208,9 @@ def rebuild_jsonl():
             for blk in re.split(r"^## ", rest, flags=re.M)[1:]:
                 label, _, body = blk.partition("\n")
                 f.write(json.dumps({"law_id": meta["id"], "title": meta["title"], "type": meta["type"],
-                                    "url": meta["source"], "article": label.strip(), "text": body.strip()},
+                                    "url": meta["source"], "status": meta.get("status", ""),
+                                    "retrieved": meta.get("retrieved", ""),
+                                    "article": label.strip(), "text": body.strip()},
                                    ensure_ascii=False) + "\n")
                 n += 1
     return n

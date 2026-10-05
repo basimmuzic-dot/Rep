@@ -26,18 +26,42 @@ def norm(s):
 
 
 
+REPEALED_RE = re.compile(r"(?:ألغيت|أُلغيت|ألغي|ألغاة)\s+هذه\s+المادة")
+AMENDED_RE = re.compile(r"عدلت|عُدلت|تم تعديل|أضيفت|أُضيفت")
+
+
+def status_code(status):
+    """law status text from the site -> in_force | repealed | not_yet | pending"""
+    if status == "ساري":
+        return "in_force"
+    if status.startswith("لاغ"):
+        return "repealed"
+    if status.startswith("ساري بعد"):
+        return "not_yet"
+    return "pending"  # e.g. 'جاري العمل على النظام', or unknown: never treat as valid
+
+
+def article_flag(text):
+    head = text[:300]
+    return "repealed" if REPEALED_RE.search(head) else "amended" if AMENDED_RE.search(head) else ""
+
+
 def build():
     DB.unlink(missing_ok=True)
     c = sqlite3.connect(DB)
     c.executescript("""
-      CREATE TABLE articles(id INTEGER PRIMARY KEY, law_id, title, type, url, article, text);
+      CREATE TABLE articles(id INTEGER PRIMARY KEY, law_id, title, type, url, article, text,
+                            status, status_code, retrieved, flag);
       CREATE VIRTUAL TABLE fts USING fts5(title, article, body, tokenize='unicode61 remove_diacritics 2');
     """)
     n = 0
     for line in open(DATA / "articles.jsonl", encoding="utf-8"):
         r = json.loads(line)
-        cur = c.execute("INSERT INTO articles(law_id,title,type,url,article,text) VALUES(?,?,?,?,?,?)",
-                        (r["law_id"], r["title"], r["type"], r["url"], r["article"], r["text"]))
+        st = r.get("status", "")
+        cur = c.execute("INSERT INTO articles(law_id,title,type,url,article,text,status,status_code,retrieved,flag)"
+                        " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        (r["law_id"], r["title"], r["type"], r["url"], r["article"], r["text"],
+                         st, status_code(st), r.get("retrieved", ""), article_flag(r["text"])))
         c.execute("INSERT INTO fts(rowid,title,article,body) VALUES(?,?,?,?)",
                   (cur.lastrowid, norm(r["title"]), norm(r["article"]), norm(r["text"])))
         n += 1
@@ -51,7 +75,19 @@ def _db():
     return c
 
 
-def search(query, k=5, law=None, snippet_chars=350):
+def _tags(r):
+    """warnings that must travel with any result that is not plain current law"""
+    t = {}
+    if r["status_code"] != "in_force":
+        t["warning"] = f"⚠️ ليس ساريًا: حالة النظام «{r['status'] or 'غير معروفة'}» — لا يُعتمد عليه"
+    if r["flag"] == "repealed":
+        t["article_status"] = "⚠️ مادة ملغاة — لا يُعتمد عليها"
+    elif r["flag"] == "amended":
+        t["article_status"] = "معدلة: النص يتضمن سجل التعديلات، والمعتمد أحدث تعديل؛ تحقق من المصدر"
+    return t
+
+
+def search(query, k=5, law=None, snippet_chars=350, include_inactive=False):
     terms = [t for t in re.findall(r"\w+", norm(query)) if len(t) > 1]
     if not terms:
         return []
@@ -60,21 +96,29 @@ def search(query, k=5, law=None, snippet_chars=350):
     q = " OR ".join(f'"{t}"*' for t in terms)
     if len(terms) > 1:  # reward the exact phrase and adjacent words
         q += ' OR "' + " ".join(terms) + '"' + "".join(f' OR "{a} {b}"' for a, b in zip(terms, terms[1:]))
-    sql = """SELECT a.id,a.title,a.type,a.article,a.text,a.url FROM fts JOIN articles a ON a.id=fts.rowid
+    sql = """SELECT a.id,a.title,a.type,a.article,a.text,a.url,a.status,a.status_code,a.flag FROM fts JOIN articles a ON a.id=fts.rowid
              WHERE fts MATCH ? {} ORDER BY bm25(fts,{tw},1.0,1.0) LIMIT ?"""
-    args = [q]
+    args, cond = [q], ""
     if law:
-        sql = sql.format("AND a.title LIKE ?", tw=TITLE_W)
+        cond += " AND a.title LIKE ?"
         args.append(f"%{law}%")
-    else:
-        sql = sql.format("", tw=TITLE_W)
-    rows = _db().execute(sql, args + [k]).fetchall()
+    db = _db()
+    hidden = 0
+    if not include_inactive:  # expired law must never look valid: hide repealed/pending laws and repealed articles
+        cond_active = cond + " AND a.status_code='in_force' AND a.flag!='repealed'"
+        hidden = db.execute(f"SELECT COUNT(*) FROM fts JOIN articles a ON a.id=fts.rowid WHERE fts MATCH ?{cond}"
+                            " AND (a.status_code!='in_force' OR a.flag='repealed')", args).fetchone()[0]
+        cond = cond_active
+    rows = db.execute(sql.format(cond, tw=TITLE_W), args + [k]).fetchall()
     out = []
     for r in rows:
         t = r["text"]
         cut = t if len(t) <= snippet_chars else t[:snippet_chars] + "…"
         out.append({"id": r["id"], "law": r["title"], "type": r["type"], "article": r["article"],
-                    "text": cut, "truncated": len(t) > snippet_chars})
+                    "text": cut, "truncated": len(t) > snippet_chars, **_tags(r)})
+    if hidden:
+        out.append({"note": f"{hidden} matching articles in repealed/pending laws or repealed articles were hidden; "
+                            "pass include_inactive=true to see them (they are not valid law)."})
     return out
 
 
@@ -85,12 +129,17 @@ def get_article(id=None, law=None, article=None):
     else:
         r = c.execute("SELECT * FROM articles WHERE title LIKE ? AND article LIKE ? LIMIT 1",
                       (f"%{law}%", f"%{article}%")).fetchone()
-    return dict(r) if r else {"error": "not found"}
+    return {**dict(r), **_tags(r)} if r else {"error": "not found"}
 
 
-def list_laws():
-    return [dict(r) for r in _db().execute(
-        "SELECT title, type, COUNT(*) AS articles FROM articles GROUP BY law_id ORDER BY type, title")]
+def list_laws(title_contains=None, include_inactive=False):
+    cond = "" if include_inactive else "WHERE status_code='in_force'"
+    if title_contains:
+        cond += (" AND " if cond else "WHERE ") + "title LIKE ?"
+    rows = _db().execute(
+        "SELECT title, type, status, retrieved, COUNT(*) AS articles FROM articles "
+        f"{cond} GROUP BY law_id ORDER BY type, title", (f"%{title_contains}%",) if title_contains else ()).fetchall()
+    return [{k: v for k, v in dict(r).items() if not (k == "status" and v == "ساري")} for r in rows]
 
 
 # ---------------- minimal MCP (JSON-RPC over stdio), no SDK needed ----------------
@@ -98,27 +147,31 @@ TOOLS = [
     {"name": "search_saudi_laws",
      "description": "Search Saudi laws and implementing regulations (الأنظمة واللوائح) article by article. "
                     "Returns the top-k matching articles as short snippets. Query in Arabic for best results; the match is lexical, so if results look off, retry with the law's own wording (e.g. 'ينتهي عقد العمل' rather than 'فسخ') or several short queries. "
+                    "By default only laws and articles IN FORCE are returned; anything carrying a warning/article_status field is not plain current law, so flag it to the user. "
                     "Use get_saudi_law_article(id) for full text only if a snippet is truncated and needed.",
      "inputSchema": {"type": "object", "properties": {
          "query": {"type": "string"}, "k": {"type": "integer", "default": 5, "maximum": 20},
-         "law": {"type": "string", "description": "optional: restrict to laws whose title contains this"}},
+         "law": {"type": "string", "description": "optional: restrict to laws whose title contains this"},
+         "include_inactive": {"type": "boolean", "default": False,
+                              "description": "also return repealed/pending laws and repealed articles (NOT valid law; for history only)"}},
          "required": ["query"]}},
     {"name": "get_saudi_law_article",
      "description": "Full text of one article, by id from search results, or by law title + article label.",
      "inputSchema": {"type": "object", "properties": {
          "id": {"type": "integer"}, "law": {"type": "string"}, "article": {"type": "string"}}}},
-    {"name": "list_saudi_laws", "description": "List indexed laws/regulations with article counts.",
-     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "list_saudi_laws", "description": "List indexed laws/regulations (in force by default) with article counts. Optionally filter by title.",
+     "inputSchema": {"type": "object", "properties": {
+         "title_contains": {"type": "string"}, "include_inactive": {"type": "boolean", "default": False}}}},
 ]
 
 
 def call(name, a):
     if name == "search_saudi_laws":
-        return search(a["query"], min(int(a.get("k", 5)), 20), a.get("law"))
+        return search(a["query"], min(int(a.get("k", 5)), 20), a.get("law"), include_inactive=bool(a.get("include_inactive")))
     if name == "get_saudi_law_article":
         return get_article(a.get("id"), a.get("law"), a.get("article"))
     if name == "list_saudi_laws":
-        return list_laws()
+        return list_laws(a.get("title_contains"), bool(a.get("include_inactive")))
     raise ValueError(name)
 
 
