@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "saudi-laws": { "command": "python3", "args": ["saudi-laws/kb.py", "serve"] }
+  }
+}
