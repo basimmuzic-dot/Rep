@@ -9,11 +9,19 @@ Why this design: retrieval runs locally (BM25 over Arabic-normalized text), so i
 zero tokens. Claude only receives the few matching articles, trimmed to a snippet,
 and fetches a full article only when it needs one.
 """
-import json, re, sqlite3, sys
+import datetime, json, re, sqlite3, sys, time
 from pathlib import Path
 
 DATA = Path(__file__).parent / "data"
-DB = DATA / "laws.db"
+CURRENT = DATA / "laws.current"  # names the live index file; build() writes a fresh one each time so a
+                                 # running server that still has the old file open (Windows lock) never blocks a rebuild
+
+
+def db_path():
+    try:
+        return DATA / CURRENT.read_text(encoding="utf-8").strip()
+    except OSError:
+        return DATA / "laws.db"
 TITLE_W = 0.3  # bm25 weight of the law title column (body and article label are 1.0)
 DIACRITICS = re.compile(r"[ؐ-ًؚ-ٰٟۖ-ۭـ]")
 
@@ -31,14 +39,27 @@ AMENDED_RE = re.compile(r"عدلت|عُدلت|تم تعديل|أضيفت|أُض�
 
 
 def status_code(status):
-    """law status text from the site -> in_force | repealed | not_yet | pending"""
+    """law status text from the site -> in_force | repealed | not_yet | unverified"""
     if status == "ساري":
         return "in_force"
     if status.startswith("لاغ"):
         return "repealed"
     if status.startswith("ساري بعد"):
-        return "not_yet"
-    return "pending"  # e.g. 'جاري العمل على النظام', or unknown: never treat as valid
+        return "not_yet"  # 'ساري بعد مدة 180 يوم من تاريخ النشر': becomes valid on a computed date
+    return "unverified"  # e.g. 'جاري العمل على النظام' (no publication date on the site): shown, with a warning
+
+
+def effective_from(status, published):
+    """ISO date a 'ساري بعد مدة N يوم من تاريخ النشر' law takes effect ('' if it cannot be computed)"""
+    m = re.search(r"(\d+)\s*يوم", status)
+    if not (m and published):
+        return ""
+    return (datetime.date.fromisoformat(published) + datetime.timedelta(days=int(m.group(1)))).isoformat()
+
+
+# valid today: in force, unverified (shown with a warning), or past its computed effective date
+ACTIVE = ("(a.status_code IN ('in_force','unverified') OR "
+          "(a.status_code='not_yet' AND a.effective_from!='' AND a.effective_from<=date('now')))")
 
 
 def article_flag(text):
@@ -47,30 +68,40 @@ def article_flag(text):
 
 
 def build():
-    DB.unlink(missing_ok=True)
-    c = sqlite3.connect(DB)
+    new = DATA / f"laws-{int(time.time())}.db"
+    c = sqlite3.connect(new)
     c.executescript("""
       CREATE TABLE articles(id INTEGER PRIMARY KEY, law_id, title, type, url, article, text,
-                            status, status_code, retrieved, flag);
+                            status, status_code, retrieved, published, effective_from, flag);
       CREATE VIRTUAL TABLE fts USING fts5(title, article, body, tokenize='unicode61 remove_diacritics 2');
     """)
     n = 0
     for line in open(DATA / "articles.jsonl", encoding="utf-8"):
         r = json.loads(line)
         st = r.get("status", "")
-        cur = c.execute("INSERT INTO articles(law_id,title,type,url,article,text,status,status_code,retrieved,flag)"
-                        " VALUES(?,?,?,?,?,?,?,?,?,?)",
+        pub = r.get("published", "")
+        cur = c.execute("INSERT INTO articles(law_id,title,type,url,article,text,status,status_code,retrieved,"
+                        "published,effective_from,flag) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                         (r["law_id"], r["title"], r["type"], r["url"], r["article"], r["text"],
-                         st, status_code(st), r.get("retrieved", ""), article_flag(r["text"])))
+                         st, status_code(st), r.get("retrieved", ""), pub, effective_from(st, pub),
+                         article_flag(r["text"])))
         c.execute("INSERT INTO fts(rowid,title,article,body) VALUES(?,?,?,?)",
                   (cur.lastrowid, norm(r["title"]), norm(r["article"]), norm(r["text"])))
         n += 1
     c.commit()
-    print(f"indexed {n} articles → {DB}")
+    c.close()
+    CURRENT.write_text(new.name, encoding="utf-8")
+    for old in DATA.glob("laws*.db"):  # best effort: a file still open in another process stays until it exits
+        if old != new:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+    print(f"indexed {n} articles → {new}")
 
 
 def _db():
-    c = sqlite3.connect(DB)
+    c = sqlite3.connect(db_path())
     c.row_factory = sqlite3.Row
     return c
 
@@ -78,8 +109,15 @@ def _db():
 def _tags(r):
     """warnings that must travel with any result that is not plain current law"""
     t = {}
-    if r["status_code"] != "in_force":
-        t["warning"] = f"⚠️ ليس ساريًا: حالة النظام «{r['status'] or 'غير معروفة'}» — لا يُعتمد عليه"
+    code, today = r["status_code"], datetime.date.today().isoformat()
+    if code == "repealed":
+        t["warning"] = f"⚠️ نظام لاغٍ (حالة الموقع «{r['status']}») — لا يُعتمد عليه"
+    elif code == "not_yet" and not (r["effective_from"] and r["effective_from"] <= today):
+        when = f"يسري من {r['effective_from']}" if r["effective_from"] else "تاريخ السريان غير محدد"
+        t["warning"] = f"⚠️ لم يبدأ سريانه بعد ({when}) — لا يُعتمد عليه الآن"
+    elif code == "unverified":
+        t["warning"] = (f"⚠️ حالة النظام على الموقع «{r['status'] or 'غير معروفة'}» وتاريخ النشر غير محدد — "
+                        "سريانه غير مؤكد؛ تحقق من المصدر الرسمي")
     if r["flag"] == "repealed":
         t["article_status"] = "⚠️ مادة ملغاة — لا يُعتمد عليها"
     elif r["flag"] == "amended":
@@ -96,7 +134,7 @@ def search(query, k=5, law=None, snippet_chars=350, include_inactive=False):
     q = " OR ".join(f'"{t}"*' for t in terms)
     if len(terms) > 1:  # reward the exact phrase and adjacent words
         q += ' OR "' + " ".join(terms) + '"' + "".join(f' OR "{a} {b}"' for a, b in zip(terms, terms[1:]))
-    sql = """SELECT a.id,a.title,a.type,a.article,a.text,a.url,a.status,a.status_code,a.flag FROM fts JOIN articles a ON a.id=fts.rowid
+    sql = """SELECT a.id,a.title,a.type,a.article,a.text,a.url,a.status,a.status_code,a.effective_from,a.flag FROM fts JOIN articles a ON a.id=fts.rowid
              WHERE fts MATCH ? {} ORDER BY bm25(fts,{tw},1.0,1.0) LIMIT ?"""
     args, cond = [q], ""
     if law:
@@ -105,9 +143,9 @@ def search(query, k=5, law=None, snippet_chars=350, include_inactive=False):
     db = _db()
     hidden = 0
     if not include_inactive:  # expired law must never look valid: hide repealed/pending laws and repealed articles
-        cond_active = cond + " AND a.status_code='in_force' AND a.flag!='repealed'"
+        cond_active = cond + f" AND {ACTIVE} AND a.flag!='repealed'"
         hidden = db.execute(f"SELECT COUNT(*) FROM fts JOIN articles a ON a.id=fts.rowid WHERE fts MATCH ?{cond}"
-                            " AND (a.status_code!='in_force' OR a.flag='repealed')", args).fetchone()[0]
+                            f" AND NOT ({ACTIVE} AND a.flag!='repealed')", args).fetchone()[0]
         cond = cond_active
     rows = db.execute(sql.format(cond, tw=TITLE_W), args + [k]).fetchall()
     out = []
@@ -117,8 +155,8 @@ def search(query, k=5, law=None, snippet_chars=350, include_inactive=False):
         out.append({"id": r["id"], "law": r["title"], "type": r["type"], "article": r["article"],
                     "text": cut, "truncated": len(t) > snippet_chars, **_tags(r)})
     if hidden:
-        out.append({"note": f"{hidden} matching articles in repealed/pending laws or repealed articles were hidden; "
-                            "pass include_inactive=true to see them (they are not valid law)."})
+        out.append({"note": f"{hidden} matching articles were hidden because they are repealed, repealed articles, "
+                            "or in laws not yet in force; pass include_inactive=true to see them (not valid law)."})
     return out
 
 
@@ -133,12 +171,12 @@ def get_article(id=None, law=None, article=None):
 
 
 def list_laws(title_contains=None, include_inactive=False):
-    cond = "" if include_inactive else "WHERE status_code='in_force'"
+    cond = "" if include_inactive else f"WHERE {ACTIVE}"
     if title_contains:
-        cond += (" AND " if cond else "WHERE ") + "title LIKE ?"
+        cond += (" AND " if cond else "WHERE ") + "a.title LIKE ?"
     rows = _db().execute(
-        "SELECT title, type, status, retrieved, COUNT(*) AS articles FROM articles "
-        f"{cond} GROUP BY law_id ORDER BY type, title", (f"%{title_contains}%",) if title_contains else ()).fetchall()
+        "SELECT a.title, a.type, a.status, a.published, a.retrieved, COUNT(*) AS articles FROM articles a "
+        f"{cond} GROUP BY a.law_id ORDER BY a.type, a.title", (f"%{title_contains}%",) if title_contains else ()).fetchall()
     return [{k: v for k, v in dict(r).items() if not (k == "status" and v == "ساري")} for r in rows]
 
 

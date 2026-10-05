@@ -19,3 +19,17 @@ Then open Claude Code in the repo root. `.mcp.json` registers the `saudi-laws` M
 
 ## Why it's cheap to run
 Claude never loads the laws. It calls `search_saudi_laws` and gets about 5 article snippets (around 350 characters each, roughly 1–2k tokens in total). It calls `get_saudi_law_article` only when it needs the full text of one article. Searching runs on your machine and costs no tokens. There are no embedding API calls.
+
+## Expired / non-valid law
+Each law carries the site's `الحالة` field (front matter `status:`, plus `published:` and `retrieved:` dates).
+- `ساري` (in force): returned normally.
+- `لاغي` (repealed) and individual articles that say "ألغيت هذه المادة": hidden from search by default.
+- `ساري بعد مدة N يوم من تاريخ النشر`: hidden until the computed effective date, then valid automatically.
+- `جاري العمل على النظام` (no publication date on the site): shown with a ⚠️ warning, validity unconfirmed.
+- Amended articles are tagged `article_status`: the text includes the amendment history, the latest amendment governs.
+Pass `include_inactive=true` to see hidden items (each carries a ⚠️ warning). Statuses are a snapshot from `retrieved:`; re-run `scrape.py` periodically.
+
+## Maintenance
+- `python scrape.py --resplit` re-parses the saved `.md` files offline (no network) and rebuilds `articles.jsonl`.
+- `python kb.py build` writes a new timestamped `laws-*.db` and points `laws.current` at it (a running server never blocks a rebuild).
+- `python eval.py` (ranking check) and `python verify.py` (spot-check articles against the live pages).

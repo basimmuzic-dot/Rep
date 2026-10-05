@@ -41,6 +41,15 @@ _folder_index = None
 STATUS_RE = re.compile(r"^\s*الحالة\s*\n+\s*(\S[^\n]*)", re.M)
 
 
+PUBLISHED_RE = re.compile(r"تاريخ النشر\s*\n+[^\n]*?(\d{1,2})/(\d{1,2})/(\d{4})\s*مـ")
+
+
+def extract_published(text):
+    """Gregorian publication date (ISO) from the page header, empty if the site has none."""
+    m = PUBLISHED_RE.search(text)
+    return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}" if m else ""
+
+
 def extract_status(text):
     """The law page's 'الحالة' field: ساري / لاغي / جاري العمل على النظام / ساري بعد مدة ..."""
     m = STATUS_RE.search(text)
@@ -153,7 +162,7 @@ def scrape(url, seen, queue, follow_related):
     if len(text) < 200:  # site error / empty detail page ("عذراً، لقد حدث خطأ", "التفاصيل")
         seen.discard(lid)
         raise RuntimeError(f"empty or error page ({len(text)} chars)")
-    status = extract_status(text)
+    status, published = extract_status(text), extract_published(text)
     title = (p.title.split("|")[0].strip() or text.split("\n", 1)[0])[:200]
     kind = "لائحة" if re.search(r"لائح", title) else "نظام"
     if follow_related:  # implementing regulations etc. are linked from the law page
@@ -164,13 +173,13 @@ def scrape(url, seen, queue, follow_related):
     arts = split_articles(text)
     (OUT / "laws").mkdir(parents=True, exist_ok=True)
     write_md({"id": lid, "title": title, "type": kind, "source": url, "status": status,
-              "retrieved": time.strftime("%Y-%m-%d")}, arts)
+              "published": published, "retrieved": time.strftime("%Y-%m-%d")}, arts)
 
 
 def write_md(meta, arts):
     status = meta.get("status", "")
     md = [f"---\nid: {meta['id']}\ntitle: {meta['title']}\ntype: {meta['type']}\nsource: {meta['source']}\n"
-          f"status: {status}\nretrieved: {meta.get('retrieved', '')}\n---\n", f"# {meta['title']}\n"]
+          f"status: {status}\npublished: {meta.get('published', '')}\nretrieved: {meta.get('retrieved', '')}\n---\n", f"# {meta['title']}\n"]
     if status != "ساري":  # make non-binding texts impossible to miss
         md.append(f"> ⚠️ الحالة: {status or 'غير معروفة'} — ليس نظامًا ساريًا؛ لا يُعتمد عليه دون التحقق من المصدر.\n")
     md += [f"## {label}\n\n{body}\n" for label, body in arts]
@@ -190,6 +199,8 @@ def resplit():
     """Offline: re-run article splitting over the saved .md files (no network)."""
     for path in sorted((OUT / "laws").glob("*.md")):
         meta, rest = read_md(path)
+        if "published" not in meta:
+            meta["published"] = extract_published(rest)
         if not meta.get("status"):  # files saved before status was captured: it is in the page header text
             meta["status"] = extract_status(rest)
             meta["retrieved"] = time.strftime("%Y-%m-%d", time.localtime(path.stat().st_mtime))
@@ -209,7 +220,7 @@ def rebuild_jsonl():
                 label, _, body = blk.partition("\n")
                 f.write(json.dumps({"law_id": meta["id"], "title": meta["title"], "type": meta["type"],
                                     "url": meta["source"], "status": meta.get("status", ""),
-                                    "retrieved": meta.get("retrieved", ""),
+                                    "retrieved": meta.get("retrieved", ""), "published": meta.get("published", ""),
                                     "article": label.strip(), "text": body.strip()},
                                    ensure_ascii=False) + "\n")
                 n += 1
