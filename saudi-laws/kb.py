@@ -21,7 +21,8 @@ def norm(s):
     """Arabic normalization so 'المادة' / 'المادّة' / 'إدارة' / 'ادارة' all match."""
     s = DIACRITICS.sub("", s)
     s = re.sub("[إأآٱ]", "ا", s).replace("ى", "ي").replace("ة", "ه").replace("ؤ", "و").replace("ئ", "ي")
-    return s
+    return re.sub(r"(?<!\w)ال(?=\w{3,})", "", s)  # drop the definite article so 'العمل' matches 'عمل'
+
 
 
 def build():
@@ -56,8 +57,10 @@ def search(query, k=5, law=None, snippet_chars=350):
     # OR-match with prefix (Arabic has many affixes); BM25 ranks docs with more terms higher.
     # Title hits weighted 3x, article label 1x, body 1x.
     q = " OR ".join(f'"{t}"*' for t in terms)
+    if len(terms) > 1:  # reward the exact phrase and adjacent words
+        q += ' OR "' + " ".join(terms) + '"' + "".join(f' OR "{a} {b}"' for a, b in zip(terms, terms[1:]))
     sql = """SELECT a.id,a.title,a.type,a.article,a.text,a.url FROM fts JOIN articles a ON a.id=fts.rowid
-             WHERE fts MATCH ? {} ORDER BY bm25(fts,3.0,1.0,1.0) LIMIT ?"""
+             WHERE fts MATCH ? {} ORDER BY bm25(fts,0.3,1.0,1.0) LIMIT ?"""
     args = [q]
     if law:
         sql = sql.format("AND a.title LIKE ?")
@@ -93,7 +96,7 @@ def list_laws():
 TOOLS = [
     {"name": "search_saudi_laws",
      "description": "Search Saudi laws and implementing regulations (الأنظمة واللوائح) article by article. "
-                    "Returns the top-k matching articles as short snippets. Query in Arabic for best results. "
+                    "Returns the top-k matching articles as short snippets. Query in Arabic for best results; the match is lexical, so if results look off, retry with the law's own wording (e.g. 'ينتهي عقد العمل' rather than 'فسخ') or several short queries. "
                     "Use get_saudi_law_article(id) for full text only if a snippet is truncated and needed.",
      "inputSchema": {"type": "object", "properties": {
          "query": {"type": "string"}, "k": {"type": "integer", "default": 5, "maximum": 20},
