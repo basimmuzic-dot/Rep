@@ -34,6 +34,21 @@ def fetch(url, tries=4):
                 raise
             print(f"  retry {url}: {e}", file=sys.stderr)
             time.sleep(2 ** (i + 1))
+# site widgets that leak into the text (visit counter, notify button, per-article buttons)
+NOISE_RE = re.compile(r"^(عدد مرات التصفح\s*\d*|طلب اشعار|تعديلات المادة|نبذة عن النظام)$")
+_folder_index = None
+
+
+def regulation_links(title):
+    """The law pages do not link to their regulations; find them by title in the folder index."""
+    global _folder_index
+    if _folder_index is None:
+        page = fetch(f"{BASE}/BoeLaws/Laws/Folders/1")
+        _folder_index = [(m.group(1), re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", m.group(2))).strip())
+                         for m in re.finditer(r'<a [^>]*href="[^"]*LawDetails/([0-9a-f-]{36})/\d+[^"]*"[^>]*>(.*?)</a>', page, re.S)]
+    if "لائح" in title:
+        return []
+    return [f"{BASE}/BoeLaws/Laws/LawDetails/{i}/1" for i, t in _folder_index if "لائح" in t and title in t]
 
 
 class TextExtractor(HTMLParser):
@@ -81,6 +96,7 @@ class TextExtractor(HTMLParser):
     def text(self):
         t = html.unescape("".join(self.parts)).replace("\xa0", " ")
         t = re.sub(r"[ \t]+", " ", t)
+        t = "\n".join(l for l in t.split("\n") if not NOISE_RE.match(l.strip()))
         return re.sub(r"\n\s*\n+", "\n\n", t).strip()
 
 
@@ -102,7 +118,11 @@ def split_articles(text):
         body = text[pos:end].strip()
         body = body[len(label):].lstrip(" :：\n") if body.startswith(label) else body
         out.append((label, body))
-    return [(l, b) for l, b in out if b]
+    merged = {}  # amendment history repeats the article heading: keep one heading per article
+    for l, b in out:
+        if b:
+            merged[l] = merged[l] + "\n\n" + b if l in merged else b
+    return list(merged.items())
 
 
 def scrape(url, seen, queue, follow_related):
@@ -117,10 +137,10 @@ def scrape(url, seen, queue, follow_related):
     title = (p.title.split("|")[0].strip() or text.split("\n", 1)[0])[:200]
     kind = "لائحة" if re.search(r"لائح", title) else "نظام"
     if follow_related:  # implementing regulations etc. are linked from the law page
-        for href in p.links:
-            full = href if href.startswith("http") else BASE + href
-            if law_id(full) not in seen:
+        for full in [h if h.startswith("http") else BASE + h for h in p.links] + regulation_links(title):
+            if law_id(full) not in seen and full not in queue:
                 queue.append(full)
+    text = re.sub(r"\A(?:\s*" + re.escape(title) + r"\s*\n)+", "", text)  # page repeats the title
     arts = split_articles(text)
     (OUT / "laws").mkdir(parents=True, exist_ok=True)
     md = [f"---\nid: {lid}\ntitle: {title}\ntype: {kind}\nsource: {url}\n---\n", f"# {title}\n"]
