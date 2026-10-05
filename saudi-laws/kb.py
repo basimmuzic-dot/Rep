@@ -14,6 +14,7 @@ from pathlib import Path
 
 DATA = Path(__file__).parent / "data"
 DB = DATA / "laws.db"
+TITLE_W = 0.3  # bm25 weight of the law title column (body and article label are 1.0)
 DIACRITICS = re.compile(r"[ؐ-ًؚ-ٰٟۖ-ۭـ]")
 
 
@@ -21,7 +22,7 @@ def norm(s):
     """Arabic normalization so 'المادة' / 'المادّة' / 'إدارة' / 'ادارة' all match."""
     s = DIACRITICS.sub("", s)
     s = re.sub("[إأآٱ]", "ا", s).replace("ى", "ي").replace("ة", "ه").replace("ؤ", "و").replace("ئ", "ي")
-    return re.sub(r"(?<!\w)ال(?=\w{3,})", "", s)  # drop the definite article so 'العمل' matches 'عمل'
+    return re.sub(r"(?<!\w)(?:لل|[وفبك]ال|ال)(?=\w{3,})", "", s)  # drop the article/clitic so 'العمل', 'للعمل', 'بالعمل' match 'عمل'
 
 
 
@@ -60,13 +61,13 @@ def search(query, k=5, law=None, snippet_chars=350):
     if len(terms) > 1:  # reward the exact phrase and adjacent words
         q += ' OR "' + " ".join(terms) + '"' + "".join(f' OR "{a} {b}"' for a, b in zip(terms, terms[1:]))
     sql = """SELECT a.id,a.title,a.type,a.article,a.text,a.url FROM fts JOIN articles a ON a.id=fts.rowid
-             WHERE fts MATCH ? {} ORDER BY bm25(fts,0.3,1.0,1.0) LIMIT ?"""
+             WHERE fts MATCH ? {} ORDER BY bm25(fts,{tw},1.0,1.0) LIMIT ?"""
     args = [q]
     if law:
-        sql = sql.format("AND a.title LIKE ?")
+        sql = sql.format("AND a.title LIKE ?", tw=TITLE_W)
         args.append(f"%{law}%")
     else:
-        sql = sql.format("")
+        sql = sql.format("", tw=TITLE_W)
     rows = _db().execute(sql, args + [k]).fetchall()
     out = []
     for r in rows:

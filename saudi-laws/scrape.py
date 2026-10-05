@@ -20,7 +20,7 @@ OUT = Path(__file__).parent / "data"
 UA = {"User-Agent": "Mozilla/5.0 (law-kb research scraper)", "Accept-Language": "ar"}
 DETAIL_RE = re.compile(r"/BoeLaws/Laws/LawDetails/([0-9a-f-]{36})/\d+", re.I)
 # "المادة الأولى" / "المادة 12" / "المادة الحادية عشرة" ...
-ARTICLE_RE = re.compile(r"^\s*(المادة\s+[^\n:：]{1,40}?)\s*[:：]?\s*$|^\s*(المادة\s+\S+(?:\s+\S+){0,3})\s*[:：]", re.M)
+ARTICLE_RE = re.compile(r"^[ \t]*((?:ال)?مادة[ \t]*[^\n:：]{1,40}?)[ \t]*[:：]?[ \t]*$|^[ \t]*((?:ال)?مادة[ \t]*\S+(?:[ \t]+\S+){0,3})[ \t]*[:：]", re.M)
 
 
 def fetch(url, tries=4):
@@ -35,7 +35,8 @@ def fetch(url, tries=4):
             print(f"  retry {url}: {e}", file=sys.stderr)
             time.sleep(2 ** (i + 1))
 # site widgets that leak into the text (visit counter, notify button, per-article buttons)
-NOISE_RE = re.compile(r"^(عدد مرات التصفح\s*\d*|طلب اشعار|تعديلات المادة|نبذة عن النظام)$")
+NOISE_RE = re.compile(r"^(عدد مرات التصفح\s*\d*|طلب اشعار|تعديلات المادة|نبذة عن النظام"
+                      r"|مادة معدلة|مادة ملغية|اصل الوثيقة|طباعة|الملاحظات والتعليقات|الإصدارات|اللغات)$")
 _folder_index = None
 
 
@@ -108,8 +109,16 @@ def law_id(url):
 def split_articles(text):
     """Return [(article_label, body)]; preamble (decree, title) is article '0'."""
     hits = [(m.start(), (m.group(1) or m.group(2)).strip()) for m in ARTICLE_RE.finditer(text)]
-    if not hits:
-        return [("النص", text)]
+    if not hits:  # no articles (regulations, rules): chunk by paragraph so search returns small pieces
+        chunks, cur = [], ""
+        for para in (p for p in text.split("\n") if p.strip()):
+            if cur and len(cur) + len(para) > 1500:
+                chunks.append(cur)
+                cur = ""
+            cur += ("\n" if cur else "") + para
+        if cur:
+            chunks.append(cur)
+        return [(f"النص ({i})", c) for i, c in enumerate(chunks, 1)] if len(chunks) > 1 else [("النص", text)]
     out = []
     if hits[0][0] > 0:
         out.append(("الديباجة", text[: hits[0][0]].strip()))
@@ -134,6 +143,9 @@ def scrape(url, seen, queue, follow_related):
     p = TextExtractor()
     p.feed(fetch(url))
     text = p.text()
+    if len(text) < 200:  # site error / empty detail page ("عذراً، لقد حدث خطأ", "التفاصيل")
+        seen.discard(lid)
+        raise RuntimeError(f"empty or error page ({len(text)} chars)")
     title = (p.title.split("|")[0].strip() or text.split("\n", 1)[0])[:200]
     kind = "لائحة" if re.search(r"لائح", title) else "نظام"
     if follow_related:  # implementing regulations etc. are linked from the law page
@@ -143,11 +155,47 @@ def scrape(url, seen, queue, follow_related):
     text = re.sub(r"\A(?:\s*" + re.escape(title) + r"\s*\n)+", "", text)  # page repeats the title
     arts = split_articles(text)
     (OUT / "laws").mkdir(parents=True, exist_ok=True)
-    md = [f"---\nid: {lid}\ntitle: {title}\ntype: {kind}\nsource: {url}\n---\n", f"# {title}\n"]
+    write_md({"id": lid, "title": title, "type": kind, "source": url}, arts)
+
+
+def write_md(meta, arts):
+    md = [f"---\nid: {meta['id']}\ntitle: {meta['title']}\ntype: {meta['type']}\nsource: {meta['source']}\n---\n",
+          f"# {meta['title']}\n"]
     md += [f"## {label}\n\n{body}\n" for label, body in arts]
-    (OUT / "laws" / f"{lid}.md").write_text("\n".join(md), encoding="utf-8")
-    return [{"law_id": lid, "title": title, "type": kind, "url": url, "article": label, "text": body}
-            for label, body in arts]
+    (OUT / "laws").mkdir(parents=True, exist_ok=True)
+    (OUT / "laws" / f"{meta['id']}.md").write_text("\n".join(md), encoding="utf-8")
+
+
+def read_md(path):
+    """-> (front-matter dict, text after the '# title' line)"""
+    _, fm, rest = path.read_text(encoding="utf-8").split("---\n", 2)
+    meta = dict(l.split(": ", 1) for l in fm.strip().splitlines() if ": " in l)
+    return meta, rest.strip().split("\n", 1)[1] if "\n" in rest.strip() else ""
+
+
+def resplit():
+    """Offline: re-run article splitting over the saved .md files (no network)."""
+    for path in sorted((OUT / "laws").glob("*.md")):
+        meta, rest = read_md(path)
+        rest = re.sub(r"^## (?:النص(?: \(\d+\))?|الديباجة)[ \t]*$", "", rest, flags=re.M)  # synthetic headings
+        rest = re.sub(r"^## ", "", rest, flags=re.M)  # real article headings become heading lines again
+        rest = "\n".join(l for l in rest.split("\n") if not NOISE_RE.match(l.strip()))
+        write_md(meta, split_articles(rest.strip()))
+
+
+def rebuild_jsonl():
+    """articles.jsonl is always derived from data/laws/*.md, so partial runs never drop other laws."""
+    n = 0
+    with open(OUT / "articles.jsonl", "w", encoding="utf-8") as f:
+        for path in sorted((OUT / "laws").glob("*.md")):
+            meta, rest = read_md(path)
+            for blk in re.split(r"^## ", rest, flags=re.M)[1:]:
+                label, _, body = blk.partition("\n")
+                f.write(json.dumps({"law_id": meta["id"], "title": meta["title"], "type": meta["type"],
+                                    "url": meta["source"], "article": label.strip(), "text": body.strip()},
+                                   ensure_ascii=False) + "\n")
+                n += 1
+    return n
 
 
 def folder_links(max_folders):
@@ -169,23 +217,25 @@ def main():
                     help="also scan /Laws/Folders/1..N for law links (default N=30)")
     ap.add_argument("--no-related", action="store_true", help="don't follow linked regulations")
     ap.add_argument("--delay", type=float, default=1.0)
+    ap.add_argument("--resplit", action="store_true", help="offline: re-split saved .md files, rebuild articles.jsonl")
     a = ap.parse_args()
+    if a.resplit:
+        resplit()
+        print(f"resplit done: {rebuild_jsonl()} articles")
+        return
     queue = a.urls or [l.strip() for l in open(Path(__file__).parent / "urls.txt") if l.strip() and not l.startswith("#")]
     if a.crawl_folders:
         queue += folder_links(a.crawl_folders)
-    seen, rows = set(), []
+    seen = set()
     while queue:
         url = queue.pop(0)
         try:
-            rows += scrape(url, seen, queue, not a.no_related)
+            scrape(url, seen, queue, not a.no_related)
         except Exception as e:  # noqa: BLE001
             print(f"FAILED {url}: {e}", file=sys.stderr)
         time.sleep(a.delay)
     OUT.mkdir(exist_ok=True)
-    with open(OUT / "articles.jsonl", "w", encoding="utf-8") as f:
-        for r in rows:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    print(f"done: {len(seen)} documents, {len(rows)} articles → {OUT}")
+    print(f"done: {len(seen)} documents scraped, {rebuild_jsonl()} articles in total → {OUT}")
 
 
 if __name__ == "__main__":
