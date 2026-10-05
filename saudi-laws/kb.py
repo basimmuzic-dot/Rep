@@ -122,6 +122,8 @@ def call(name, a):
 
 
 def serve():
+    sys.stdin.reconfigure(encoding="utf-8")  # Windows defaults to cp1252, which breaks Arabic
+    sys.stdout.reconfigure(encoding="utf-8")
     for line in sys.stdin:
         msg = json.loads(line)
         mid, method = msg.get("id"), msg.get("method")
