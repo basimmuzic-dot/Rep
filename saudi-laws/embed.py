@@ -21,7 +21,7 @@ def passages():
     out = []
     for line in open(DATA / "articles.jsonl", encoding="utf-8"):
         r = json.loads(line)
-        head = f"{r['title']} | {r['article']}\n"
+        head = f"{r['title']} | {r.get('section', '')} | {r['article']}\n"
         parts, cur = [], ""
         for para in r["text"].split("\n"):
             if cur and len(cur) + len(para) > WINDOW:

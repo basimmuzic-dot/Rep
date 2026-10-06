@@ -23,6 +23,7 @@ def db_path():
     except OSError:
         return DATA / "laws.db"
 TITLE_W = 0.3  # bm25 weight of the law title column (body and article label are 1.0)
+SECTION_W = 0.3  # chapter heading column
 DIACRITICS = re.compile(r"[ؐ-ًؚ-ٰٟۖ-ۭـ]")
 
 
@@ -30,7 +31,8 @@ def norm(s):
     """Arabic normalization so 'المادة' / 'المادّة' / 'إدارة' / 'ادارة' all match."""
     s = DIACRITICS.sub("", s)
     s = re.sub("[إأآٱ]", "ا", s).replace("ى", "ي").replace("ة", "ه").replace("ؤ", "و").replace("ئ", "ي")
-    return re.sub(r"(?<!\w)(?:لل|[وفبك]ال|ال)(?=\w{3,})", "", s)  # drop the article/clitic so 'العمل', 'للعمل', 'بالعمل' match 'عمل'
+    return re.sub(r"(?<!\w)(?:لل|[وفبك]ال(?![دغ])|ال)(?=\w{3,})", "", s)  # drop the article/clitic so 'العمل', 'للعمل', 'بالعمل' match 'عمل'
+    # (but keep والد/والدين/بالغ: وال+د and بال+غ are real words, not clitics)
 
 
 
@@ -51,10 +53,16 @@ def status_code(status):
 
 def effective_from(status, published):
     """ISO date a 'ساري بعد مدة N يوم من تاريخ النشر' law takes effect ('' if it cannot be computed)"""
-    m = re.search(r"(\d+)\s*يوم", status)
+    m = re.search(r"(\d+)\s*(يوم|أيام|شهر|أشهر|اشهر|شهور|سنة|سنوات|سنه)", status)
     if not (m and published):
         return ""
-    return (datetime.date.fromisoformat(published) + datetime.timedelta(days=int(m.group(1)))).isoformat()
+    n, unit, d = int(m.group(1)), m.group(2), datetime.date.fromisoformat(published)
+    if unit in ("يوم", "أيام"):
+        return (d + datetime.timedelta(days=n)).isoformat()
+    months = n * (12 if unit in ("سنة", "سنوات", "سنه") else 1)
+    y, mo = divmod(d.month - 1 + months, 12)
+    last = (datetime.date(d.year + y + (mo + 1) // 12, (mo + 1) % 12 + 1, 1) - datetime.timedelta(days=1)).day
+    return datetime.date(d.year + y, mo + 1, min(d.day, last)).isoformat()
 
 
 # valid today: in force, unverified (shown with a warning), or past its computed effective date
@@ -72,22 +80,28 @@ def build():
     c = sqlite3.connect(new)
     c.executescript("""
       CREATE TABLE articles(id INTEGER PRIMARY KEY, law_id, title, type, url, article, text,
-                            status, status_code, retrieved, published, effective_from, flag);
-      CREATE VIRTUAL TABLE fts USING fts5(title, article, body, tokenize='unicode61 remove_diacritics 2');
+                            status, status_code, retrieved, published, effective_from, flag, section, ntitle, narticle);
+      CREATE VIRTUAL TABLE fts USING fts5(title, section, article, body, tokenize='unicode61 remove_diacritics 2');
     """)
-    n = 0
+    n, no_date = 0, set()
     for line in open(DATA / "articles.jsonl", encoding="utf-8"):
         r = json.loads(line)
         st = r.get("status", "")
         pub = r.get("published", "")
+        eff = effective_from(st, pub)
+        if status_code(st) == "not_yet" and not eff:
+            no_date.add(r["title"])
+        sec = r.get("section", "")
         cur = c.execute("INSERT INTO articles(law_id,title,type,url,article,text,status,status_code,retrieved,"
-                        "published,effective_from,flag) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                        "published,effective_from,flag,section,ntitle,narticle) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (r["law_id"], r["title"], r["type"], r["url"], r["article"], r["text"],
-                         st, status_code(st), r.get("retrieved", ""), pub, effective_from(st, pub),
-                         article_flag(r["text"])))
-        c.execute("INSERT INTO fts(rowid,title,article,body) VALUES(?,?,?,?)",
-                  (cur.lastrowid, norm(r["title"]), norm(r["article"]), norm(r["text"])))
+                         st, status_code(st), r.get("retrieved", ""), pub, eff,
+                         r.get("flag") or article_flag(r["text"]), sec, norm(r["title"]), norm(r["article"])))
+        c.execute("INSERT INTO fts(rowid,title,section,article,body) VALUES(?,?,?,?,?)",
+                  (cur.lastrowid, norm(r["title"]), norm(sec), norm(r["article"]), norm(r["text"])))
         n += 1
+    if no_date:
+        print("WARNING: laws 'not yet in force' whose effective date could not be computed (stay hidden):", sorted(no_date))
     c.commit()
     c.close()
     CURRENT.write_text(new.name, encoding="utf-8")
@@ -121,7 +135,8 @@ def _tags(r):
     if r["flag"] == "repealed":
         t["article_status"] = "⚠️ مادة ملغاة — لا يُعتمد عليها"
     elif r["flag"] == "amended":
-        t["article_status"] = "معدلة: النص يتضمن سجل التعديلات، والمعتمد أحدث تعديل؛ تحقق من المصدر"
+        t["article_status"] = ("معدلة: النص يعرض الأصل ثم التعديلات؛ المعتمد أحدث تعديل بحسب تاريخ المرسوم، "
+                               "ولا يُعتمد على النص الأصلي وحده")
     return t
 
 
@@ -165,7 +180,7 @@ def _fts_query(query):
 
 def _fts_ids(q, cond, args, n):
     sql = f"""SELECT a.id FROM fts JOIN articles a ON a.id=fts.rowid WHERE fts MATCH ?{cond}
-              ORDER BY bm25(fts,{TITLE_W},1.0,1.0) LIMIT ?"""
+              ORDER BY bm25(fts,{TITLE_W},{SECTION_W},1.0,1.0) LIMIT ?"""  # title, section heading, article label, body
     return [r[0] for r in _db().execute(sql, [q] + args + [n]).fetchall()]
 
 
@@ -182,15 +197,29 @@ def _fuse(rankings, weights=None):
     return sorted(score, key=score.get, reverse=True)
 
 
-def search(query=None, k=5, law=None, snippet_chars=350, include_inactive=False, queries=None):
+def _snippet(text, terms, n):
+    """The n-character window of the article that best matches the question (not just the start)."""
+    if len(text) <= n:
+        return text, False
+    best, best_score = 0, -1
+    for i in range(0, len(text) - n + 1, max(60, n // 4)):
+        w = norm(text[i:i + n])
+        score = sum(w.count(t) for t in terms)
+        if score > best_score:
+            best, best_score = i, score
+    return ("…" if best else "") + text[best:best + n] + ("…" if best + n < len(text) else ""), True
+
+
+def search(query=None, k=8, law=None, snippet_chars=350, include_inactive=False, queries=None):
     """Hybrid search. `queries` = several paraphrases / legal-term variants of the same question (fused)."""
     qs = [q for q in ([query] if query else []) + list(queries or []) if q and q.strip()]
     if not qs:
         return []
     args, cond = [], ""
     if law:
-        cond += " AND a.title LIKE ?"
-        args.append(f"%{law}%")
+        cond += " AND a.ntitle LIKE ?"  # accent/hamza-insensitive: 'الاحوال' finds 'الأحوال'
+        args.append(f"%{norm(law)}%")
+    terms = list(dict.fromkeys(t for q in qs for t in _terms(q)))
     db = _db()
     hidden = 0
     if not include_inactive:  # expired law must never look valid
@@ -210,15 +239,15 @@ def search(query=None, k=5, law=None, snippet_chars=350, include_inactive=False,
         weights.append(w)
     ids = _fuse(rankings, weights)[:k]
     rows = {r["id"]: r for r in db.execute(
-        "SELECT a.id,a.title,a.type,a.article,a.text,a.url,a.status,a.status_code,a.effective_from,a.flag "
+        "SELECT a.id,a.title,a.type,a.article,a.section,a.text,a.url,a.status,a.status_code,a.effective_from,a.flag "
         f"FROM articles a WHERE a.id IN ({','.join('?' * len(ids))})", ids).fetchall()} if ids else {}
     out = []
     for i in ids:
         r = rows[i]
-        t = r["text"]
-        cut = t if len(t) <= snippet_chars else t[:snippet_chars] + "…"
+        cut, truncated = _snippet(r["text"], terms, snippet_chars)
         out.append({"id": r["id"], "law": r["title"], "type": r["type"], "article": r["article"],
-                    "text": cut, "truncated": len(t) > snippet_chars, **_tags(r)})
+                    **({"section": r["section"]} if r["section"] else {}),
+                    "text": cut, "truncated": truncated, **_tags(r)})
     if hidden:
         out.append({"note": f"{hidden} matching articles were hidden because they are repealed, repealed articles, "
                             "or in laws not yet in force; pass include_inactive=true to see them (not valid law)."})
@@ -271,14 +300,26 @@ def _dense_rankings(qs, cond, args):
     return out
 
 
+def _full(r):
+    """one article for the caller: drop internal columns, keep status warnings"""
+    return {**{k: v for k, v in dict(r).items() if k not in ("ntitle", "narticle", "law_id", "url")}, **_tags(r)}
+
+
 def get_article(id=None, law=None, article=None):
     c = _db()
     if id is not None:
         r = c.execute("SELECT * FROM articles WHERE id=?", (id,)).fetchone()
-    else:
-        r = c.execute("SELECT * FROM articles WHERE title LIKE ? AND article LIKE ? LIMIT 1",
-                      (f"%{law}%", f"%{article}%")).fetchone()
-    return {**dict(r), **_tags(r)} if r else {"error": "not found"}
+        return _full(r) if r else {"error": "not found"}
+    if not (law and article):
+        return {"error": "give an id, or both law and article"}
+    nl, na = f"%{norm(law)}%", norm(article).strip()
+    rows = c.execute("SELECT * FROM articles WHERE ntitle LIKE ? AND narticle=?", (nl, na)).fetchall()
+    if len(rows) != 1:  # never guess: 0 or several exact matches -> show candidates
+        near = rows or c.execute("SELECT * FROM articles WHERE ntitle LIKE ? AND narticle LIKE ? LIMIT 8", (nl, f"%{na}%")).fetchall()
+        return {"error": "no unique exact match; pick one by id" if near else "not found",
+                "candidates": [{"id": x["id"], "law": x["title"], "article": x["article"]} for x in near[:8]]}
+    r = rows[0]
+    return _full(r)
 
 
 def list_laws(title_contains=None, include_inactive=False):
@@ -304,7 +345,7 @@ TOOLS = [
          "queries": {"type": "array", "items": {"type": "string"},
                      "description": "3-5 alternative phrasings of the SAME question (everyday wording, statutory wording, "
                                     "synonyms); results are fused, so recall improves a lot"},
-         "k": {"type": "integer", "default": 5, "maximum": 20},
+         "k": {"type": "integer", "default": 8, "maximum": 20},
          "law": {"type": "string", "description": "optional: restrict to laws whose title contains this"},
          "include_inactive": {"type": "boolean", "default": False,
                               "description": "also return repealed/pending laws and repealed articles (NOT valid law; for history only)"}},
@@ -321,7 +362,7 @@ TOOLS = [
 
 def call(name, a):
     if name == "search_saudi_laws":
-        return search(a.get("query"), min(int(a.get("k", 5)), 20), a.get("law"),
+        return search(a.get("query"), min(int(a.get("k", 8)), 20), a.get("law"),
                       include_inactive=bool(a.get("include_inactive")), queries=a.get("queries"))
     if name == "get_saudi_law_article":
         return get_article(a.get("id"), a.get("law"), a.get("article"))

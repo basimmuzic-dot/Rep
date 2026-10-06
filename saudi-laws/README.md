@@ -33,3 +33,13 @@ Pass `include_inactive=true` to see hidden items (each carries a ⚠️ warning)
 - `python scrape.py --resplit` re-parses the saved `.md` files offline (no network) and rebuilds `articles.jsonl`.
 - `python kb.py build` writes a new timestamped `laws-*.db` and points `laws.current` at it (a running server never blocks a rebuild).
 - `python eval.py` (ranking check) and `python verify.py` (spot-check articles against the live pages).
+
+## Search quality: how meaning-based search works
+`search_saudi_laws` fuses several retrievers (reciprocal-rank fusion) and several phrasings of the question:
+1. **Keywords** (SQLite FTS5/BM25) on Arabic-normalized text: spelling variants (ة/ه, ى/ي, hamza, diacritics, "ال") match.
+2. **Thesaurus** (`thesaurus.json`): everyday/dialect words expand to statutory wording (فصل -> إنهاء، سبب غير مشروع). Edit freely.
+3. **Semantic vectors** (`intfloat/multilingual-e5-large`, run locally, no tokens): finds articles by meaning even with no shared words.
+   Build once with `.venv/Scripts/python embed.py` (hours on CPU, resumable); needs `.venv` with `fastembed numpy`.
+   Without the vectors the server still works (keyword + thesaurus only).
+4. **Multi-query**: Claude passes 3-5 phrasings in `queries` (see `CLAUDE.md`); results are fused.
+Test sets: `eval.py` (20 topic queries), `eval2.py` (34 colloquial/typo questions), `eval3.py` (25 holdout questions never used for tuning).

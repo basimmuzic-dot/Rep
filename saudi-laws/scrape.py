@@ -11,7 +11,7 @@ Output:
     data/laws/<id>.md        one clean Markdown file per law/regulation (good for humans & AI)
     data/articles.jsonl      one JSON object per article (input for build_index.py)
 """
-import argparse, html, json, re, sys, time, urllib.request
+import argparse, gzip, html, json, re, sys, time, urllib.request
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -122,19 +122,24 @@ def law_id(url):
     return m.group(1) if m else re.sub(r"\W+", "_", url)[-60:]
 
 
-def split_articles(text):
-    """Return [(article_label, body)]; preamble (decree, title) is article '0'."""
-    hits = [(m.start(), (m.group(1) or m.group(2)).strip()) for m in ARTICLE_RE.finditer(text)]
-    if not hits:  # no articles (regulations, rules): chunk by paragraph so search returns small pieces
-        chunks, cur = [], ""
-        for para in (p for p in text.split("\n") if p.strip()):
-            if cur and len(cur) + len(para) > 1500:
-                chunks.append(cur)
-                cur = ""
-            cur += ("\n" if cur else "") + para
-        if cur:
+def chunk_text(text, size=1500):
+    """No articles (regulations, rules): chunk by paragraph so search returns small pieces."""
+    chunks, cur = [], ""
+    for para in (p for p in text.split("\n") if p.strip()):
+        if cur and len(cur) + len(para) > size:
             chunks.append(cur)
-        return [(f"النص ({i})", c) for i, c in enumerate(chunks, 1)] if len(chunks) > 1 else [("النص", text)]
+            cur = ""
+        cur += ("\n" if cur else "") + para
+    if cur:
+        chunks.append(cur)
+    return [(f"النص ({i})", c) for i, c in enumerate(chunks, 1)] if len(chunks) > 1 else [("النص", text)]
+
+
+def split_articles(text):
+    """Fallback for pages without article blocks: [(label, body)] from heading lines in plain text."""
+    hits = [(m.start(), (m.group(1) or m.group(2)).strip()) for m in ARTICLE_RE.finditer(text)]
+    if not hits:
+        return chunk_text(text)
     out = []
     if hits[0][0] > 0:
         out.append(("الديباجة", text[: hits[0][0]].strip()))
@@ -143,71 +148,136 @@ def split_articles(text):
         body = text[pos:end].strip()
         body = body[len(label):].lstrip(" :：\n") if body.startswith(label) else body
         out.append((label, body))
-    merged = {}  # amendment history repeats the article heading: keep one heading per article
+    merged = {}
     for l, b in out:
         if b:
             merged[l] = merged[l] + "\n\n" + b if l in merged else b
     return list(merged.items())
 
 
-def scrape(url, seen, queue, follow_related):
+# ---- structured parsing of the law page: every article is an <div class="article_item"> block ----
+H3_RE = re.compile(r'<h3 class="center">(.*?)</h3>', re.S)
+ITEM_RE = re.compile(r'<div class="article_item[ "]')
+POPUP_RE = re.compile(r'<div class="article_item_popup">.*?<div class="HTMLContainer">(.*?)</div>\s*(?:<a [^>]*></a>\s*)?</div>', re.S)
+MAIN_RE = re.compile(r'<div class="HTMLContainer">(.*?)</div>', re.S)
+LEVELS = (("باب", 1), ("كتاب", 1), ("جزء", 1), ("فصل", 2), ("قسم", 2), ("فرع", 3))
+REPEALED_RE = re.compile(r"(?:ألغيت|أُلغيت|ألغي|أُلغي|ألغاة)\s+هذه\s+المادة|\bمادة ملغاة\b")
+ORIG, AMEND = "【النص الأصلي — قبل التعديلات】", "【التعديلات كما وردت في الموقع — المعتمد أحدثها بحسب تاريخ المرسوم؛ وما لم يُعدَّل يبقى من النص الأصلي】"
+
+
+def html_text(fragment):
+    p = TextExtractor()
+    p.feed(fragment)
+    return p.text()
+
+
+def parse_articles(page):
+    """-> [dict(label, section, body, flag)] from article blocks; [] when the page has none.
+    flag: '' | 'amended' (the site marks the block `changed-article`) | 'repealed' (latest amendment repeals it)."""
+    heads = [(m.start(), m.end(), html_text(m.group(1)).strip(" :：\n")) for m in H3_RE.finditer(page)]
+    items = [m.start() for m in ITEM_RE.finditer(page)]
+    out, section, seen = [], {}, {}
+    for n, (s, e, label) in enumerate(heads):
+        if not re.match(r"^(?:ال)?مادة", label):
+            for word, lvl in LEVELS:
+                if re.match(rf"^(?:ال)?{word}\b", label):
+                    section = {k: v for k, v in section.items() if k < lvl}
+                    section[lvl] = label
+                    break
+            continue
+        nxt = [x for x in items if x > e] + ([heads[n + 1][0]] if n + 1 < len(heads) else [len(page)])
+        span = page[e:min(nxt)]
+        amends = [t for t in (html_text(m.group(1)) for m in POPUP_RE.finditer(span)) if t]
+        mm = MAIN_RE.search(POPUP_RE.sub("", span))
+        main = html_text(mm.group(1)) if mm else ""
+        start = max([x for x in items if x < s] or [0])
+        changed = "changed-article" in page[start:start + 120]
+        flag = "repealed" if (amends and REPEALED_RE.search(amends[-1][:300])) or REPEALED_RE.search(main[:200]) \
+            else "amended" if (changed or amends) else ""
+        body = main
+        if amends:
+            body = (f"{ORIG}\n{main}\n\n" if main else "") + f"{AMEND}\n" + "\n---\n".join(amends)
+        sec = " › ".join(section[k] for k in sorted(section))
+        if label in seen:  # numbering restarts (e.g. per chapter): keep labels unique
+            seen[label] += 1
+            label = f"{label} ({sec or seen[label]})"
+        else:
+            seen[label] = 1
+        if body:
+            out.append({"label": label, "section": sec, "body": body, "flag": flag})
+    return out
+
+
+def build_articles(page, text):
+    """Preamble from the plain text + structured articles; falls back to text splitting if the page has no blocks."""
+    arts = parse_articles(page)
+    if not arts:
+        return [{"label": l, "section": "", "body": b, "flag": ""} for l, b in split_articles(text)]
+    pre = split_articles(text)
+    head = [{"label": "الديباجة", "section": "", "body": pre[0][1], "flag": ""}] if pre and pre[0][0] == "الديباجة" else []
+    return head + arts
+
+
+def scrape(url, seen, queue, follow_related, raw_html=None, fetched=None):
     lid = law_id(url)
     if lid in seen:
         return []
     seen.add(lid)
     print(f"→ {url}")
+    page = raw_html if raw_html is not None else fetch(url)
     p = TextExtractor()
-    p.feed(fetch(url))
+    p.feed(page)
     text = p.text()
     if len(text) < 200:  # site error / empty detail page ("عذراً، لقد حدث خطأ", "التفاصيل")
         seen.discard(lid)
         raise RuntimeError(f"empty or error page ({len(text)} chars)")
+    if raw_html is None:  # cache the raw page so parser improvements never need a re-download
+        (OUT / "raw").mkdir(parents=True, exist_ok=True)
+        (OUT / "raw" / f"{lid}.html.gz").write_bytes(gzip.compress(page.encode("utf-8")))
     status, published = extract_status(text), extract_published(text)
     title = (p.title.split("|")[0].strip() or text.split("\n", 1)[0])[:200]
     kind = "لائحة" if re.search(r"لائح", title) else "نظام"
-    if follow_related:  # implementing regulations etc. are linked from the law page
+    if follow_related and raw_html is None:  # implementing regulations etc. are linked from the law page
         for full in [h if h.startswith("http") else BASE + h for h in p.links] + regulation_links(title):
             if law_id(full) not in seen and full not in queue:
                 queue.append(full)
     text = re.sub(r"\A(?:\s*" + re.escape(title) + r"\s*\n)+", "", text)  # page repeats the title
-    arts = split_articles(text)
-    (OUT / "laws").mkdir(parents=True, exist_ok=True)
-    write_md({"id": lid, "title": title, "type": kind, "source": url, "status": status,
-              "published": published, "retrieved": time.strftime("%Y-%m-%d")}, arts)
+    write_md({"id": lid, "title": title, "type": kind, "source": url, "status": status, "published": published,
+              "retrieved": fetched or time.strftime("%Y-%m-%d")}, build_articles(page, text))
 
 
 def write_md(meta, arts):
     status = meta.get("status", "")
     md = [f"---\nid: {meta['id']}\ntitle: {meta['title']}\ntype: {meta['type']}\nsource: {meta['source']}\n"
-          f"status: {status}\npublished: {meta.get('published', '')}\nretrieved: {meta.get('retrieved', '')}\n---\n", f"# {meta['title']}\n"]
+          f"status: {status}\npublished: {meta.get('published', '')}\nretrieved: {meta.get('retrieved', '')}\n---\n",
+          f"# {meta['title']}\n"]
     if status != "ساري":  # make non-binding texts impossible to miss
         md.append(f"> ⚠️ الحالة: {status or 'غير معروفة'} — ليس نظامًا ساريًا؛ لا يُعتمد عليه دون التحقق من المصدر.\n")
-    md += [f"## {label}\n\n{body}\n" for label, body in arts]
+    for a in arts:
+        head = f"## {a['label']}\n" + (f"§ {a['section']}\n" if a["section"] else "") + (f"⚑ {a['flag']}\n" if a["flag"] else "")
+        md.append(f"{head}\n{a['body']}\n")
     (OUT / "laws").mkdir(parents=True, exist_ok=True)
     (OUT / "laws" / f"{meta['id']}.md").write_text("\n".join(md), encoding="utf-8")
 
 
 def read_md(path):
-    """-> (front-matter dict, text after the '# title' line)"""
+    """-> (front-matter dict, text after the '# title' line, without the status banner)"""
     _, fm, rest = path.read_text(encoding="utf-8").split("---\n", 2)
     meta = dict(l.split(": ", 1) for l in fm.strip().splitlines() if ": " in l)
     rest = rest.strip().split("\n", 1)[1] if "\n" in rest.strip() else ""
-    return meta, re.sub(r"\A\s*> ⚠️[^\n]*\n", "", rest)  # drop the status banner
+    return meta, re.sub(r"\A\s*> ⚠️[^\n]*\n", "", rest)
 
 
-def resplit():
-    """Offline: re-run article splitting over the saved .md files (no network)."""
-    for path in sorted((OUT / "laws").glob("*.md")):
-        meta, rest = read_md(path)
-        if "published" not in meta:
-            meta["published"] = extract_published(rest)
-        if not meta.get("status"):  # files saved before status was captured: it is in the page header text
-            meta["status"] = extract_status(rest)
-            meta["retrieved"] = time.strftime("%Y-%m-%d", time.localtime(path.stat().st_mtime))
-        rest = re.sub(r"^## (?:النص(?: \(\d+\))?|الديباجة)[ \t]*$", "", rest, flags=re.M)  # synthetic headings
-        rest = re.sub(r"^## ", "", rest, flags=re.M)  # real article headings become heading lines again
-        rest = "\n".join(l for l in rest.split("\n") if not NOISE_RE.match(l.strip()))
-        write_md(meta, split_articles(rest.strip()))
+def reparse():
+    """Offline: rebuild every .md from the cached raw pages (data/raw), no network."""
+    n = 0
+    for f in sorted((OUT / "raw").glob("*.html.gz")):
+        lid = f.name[: -len(".html.gz")]
+        fetched = time.strftime("%Y-%m-%d", time.localtime(f.stat().st_mtime))  # when the page was downloaded
+        scrape(f"{BASE}/BoeLaws/Laws/LawDetails/{lid}/1", set(), [], False,
+               gzip.decompress(f.read_bytes()).decode("utf-8"), fetched)
+        n += 1
+    return n
 
 
 def rebuild_jsonl():
@@ -218,11 +288,18 @@ def rebuild_jsonl():
             meta, rest = read_md(path)
             for blk in re.split(r"^## ", rest, flags=re.M)[1:]:
                 label, _, body = blk.partition("\n")
+                section = flag = ""
+                while body.startswith(("§ ", "⚑ ")):
+                    line, _, body = body.partition("\n")
+                    if line.startswith("§ "):
+                        section = line[2:].strip()
+                    else:
+                        flag = line[2:].strip()
                 f.write(json.dumps({"law_id": meta["id"], "title": meta["title"], "type": meta["type"],
                                     "url": meta["source"], "status": meta.get("status", ""),
                                     "retrieved": meta.get("retrieved", ""), "published": meta.get("published", ""),
-                                    "article": label.strip(), "text": body.strip()},
-                                   ensure_ascii=False) + "\n")
+                                    "article": label.strip(), "section": section, "flag": flag,
+                                    "text": body.strip()}, ensure_ascii=False) + "\n")
                 n += 1
     return n
 
@@ -246,11 +323,10 @@ def main():
                     help="also scan /Laws/Folders/1..N for law links (default N=30)")
     ap.add_argument("--no-related", action="store_true", help="don't follow linked regulations")
     ap.add_argument("--delay", type=float, default=1.0)
-    ap.add_argument("--resplit", action="store_true", help="offline: re-split saved .md files, rebuild articles.jsonl")
+    ap.add_argument("--reparse", action="store_true", help="offline: rebuild .md files from the cached raw pages (data/raw)")
     a = ap.parse_args()
-    if a.resplit:
-        resplit()
-        print(f"resplit done: {rebuild_jsonl()} articles")
+    if a.reparse:
+        print(f"reparsed {reparse()} pages; {rebuild_jsonl()} articles")
         return
     queue = a.urls or [l.strip() for l in open(Path(__file__).parent / "urls.txt") if l.strip() and not l.startswith("#")]
     if a.crawl_folders:

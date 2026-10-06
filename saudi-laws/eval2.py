@@ -49,10 +49,10 @@ CASES = [
 ]
 
 
-def run(k=5, verbose=False):
+def run(k=5, verbose=False, cases=None):
     db = sqlite3.connect(kb.db_path())
     hit = 0
-    for q, law, phrase in CASES:
+    for q, law, phrase in (cases or CASES):
         res = [r for r in kb.search(q, k=k) if "law" in r]
         want = kb.norm(phrase)
         ok = False
@@ -65,7 +65,7 @@ def run(k=5, verbose=False):
         hit += ok
         if verbose or not ok:
             print(("OK  " if ok else "MISS"), q, "|", law, "|", [r["law"][:18] + "/" + r["article"][:16] for r in res[:3]] if not ok else "")
-    print(f"{hit}/{len(CASES)} in top {k}")
+    print(f"{hit}/{len(cases or CASES)} in top {k}")
     return hit
 
 
