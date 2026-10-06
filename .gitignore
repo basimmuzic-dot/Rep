@@ -3,3 +3,6 @@
 *.tres
 *.scn
 .DS_Store
+
+saudi-laws/.venv/
+saudi-laws/data/
