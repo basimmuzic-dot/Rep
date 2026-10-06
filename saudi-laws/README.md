@@ -40,6 +40,7 @@ Pass `include_inactive=true` to see hidden items (each carries a ⚠️ warning)
 2. **Thesaurus** (`thesaurus.json`): everyday/dialect words expand to statutory wording (فصل -> إنهاء، سبب غير مشروع). Edit freely.
 3. **Semantic vectors** (`intfloat/multilingual-e5-large`, run locally, no tokens): finds articles by meaning even with no shared words.
    Build once with `.venv/Scripts/python embed.py` (hours on CPU, resumable); needs `.venv` with `fastembed numpy`.
-   Without the vectors the server still works (keyword + thesaurus only).
+   Law routing: `.venv/Scripts/python embed.py --cards` embeds one card per law (title, summary, chapter headings); a question is
+   also searched inside its 4 most likely laws (small fusion weight). Without the vectors the server still works (keyword + thesaurus only).
 4. **Multi-query**: Claude passes 3-5 phrasings in `queries` (see `CLAUDE.md`); results are fused.
 Test sets: `eval.py` (20 topic queries), `eval2.py` (34 colloquial/typo questions, partly tuned), `eval3.py` (25 holdout questions, single query), `eval4.py` (same holdout, searched the production way with 4 phrasings per question).

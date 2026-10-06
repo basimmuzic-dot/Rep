@@ -255,6 +255,7 @@ def search(query=None, k=8, law=None, snippet_chars=350, include_inactive=False,
 
 
 DENSE_MODEL = "intfloat/multilingual-e5-large"
+ROUTE_W, ROUTE_L = 0.3, 4  # weight of the law-routed ranking in the fusion, and how many laws the router keeps
 _dense = {"state": "unloaded"}  # unloaded | loading | ready | off
 _dense_lock = threading.Lock()
 
@@ -272,7 +273,15 @@ def dense_load():
         mat = np.load(DATA / "embeddings.npy").astype(np.float32)
         ids = {(l, a): i for i, l, a in _db().execute("SELECT id, law_id, article FROM articles")}
         aid = np.array([ids.get((k[0], k[1]), -1) for k in keys])
-        _dense.update(np=np, mat=mat, aid=aid, model=TextEmbedding(DENSE_MODEL), state="ready")
+        _dense["unmatched"] = int((aid < 0).sum())  # passages whose article is gone: means embeddings are stale
+        try:  # per-law routing cards (optional)
+            lawkeys = json.loads((DATA / "lawcards.keys.json").read_text(encoding="utf-8"))
+            lawmat = np.load(DATA / "lawcards.npy").astype(np.float32)
+            idx = {l: i for i, l in enumerate(lawkeys)}
+            plaw = np.array([idx.get(k[0], -1) for k in keys])
+        except OSError:
+            lawmat = plaw = None
+        _dense.update(np=np, mat=mat, aid=aid, lawmat=lawmat, plaw=plaw, model=TextEmbedding(DENSE_MODEL), state="ready")
     except Exception as e:  # noqa: BLE001  keyword search still works without the semantic layer
         _dense.update(state="off", why=repr(e))
 
@@ -281,28 +290,44 @@ def _dense_rankings(qs, cond, args):
     """Semantic retriever: rank articles by meaning (cosine similarity of multilingual-e5 vectors)."""
     if _dense["state"] == "unloaded":
         dense_load()
+    for _ in range(300):  # the model is loading in the background: wait (max 30 s) instead of silently going keyword-only
+        if _dense["state"] != "loading":
+            break
+        time.sleep(0.1)
     if _dense["state"] != "ready":
         return []
     np, mat, aid = _dense["np"], _dense["mat"], _dense["aid"]
     out = []
     for q in qs:
         v = np.array(list(_dense["model"].embed(["query: " + q]))[0], dtype=np.float32)
-        sims = mat @ (v / np.linalg.norm(v))
-        top = np.argpartition(-sims, 400)[:400]
-        seen = []
-        for i in top[np.argsort(-sims[top])]:
-            a = int(aid[i])
-            if a >= 0 and a not in seen:
-                seen.append(a)
-        ok = {r[0] for r in _db().execute(
-            f"SELECT a.id FROM articles a WHERE a.id IN ({','.join('?' * len(seen))}){cond}", seen + args)}
-        out.append(([a for a in seen if a in ok][:60], 1.0))
+        v = v / np.linalg.norm(v)
+        sims = mat @ v
+        views = [sims]
+        if _dense["lawmat"] is not None:  # law routing: also rank passages inside the 4 laws that best fit the question
+            top_laws = np.argsort(-(_dense["lawmat"] @ v))[:ROUTE_L]
+            views.append(np.where(np.isin(_dense["plaw"], top_laws), sims, -1.0))
+        for view in views:
+            top = np.argpartition(-view, 400)[:400]
+            seen = []
+            for i in top[np.argsort(-view[top])]:
+                a = int(aid[i])
+                if a >= 0 and view[i] > -1 and a not in seen:
+                    seen.append(a)
+            ok = {r[0] for r in _db().execute(
+                f"SELECT a.id FROM articles a WHERE a.id IN ({','.join('?' * len(seen))}){cond}", seen + args)}
+            out.append(([a for a in seen if a in ok][:60], 1.0 if view is sims else ROUTE_W))
     return out
 
 
 def _full(r):
     """one article for the caller: drop internal columns, keep status warnings"""
-    return {**{k: v for k, v in dict(r).items() if k not in ("ntitle", "narticle", "law_id")}, **_tags(r)}
+    out = {**{k: v for k, v in dict(r).items() if k not in ("ntitle", "narticle", "law_id")}, **_tags(r)}
+    if r["type"] != "لائحة":  # point to the implementing regulation(s): the operative detail is often there
+        regs = _db().execute("SELECT DISTINCT title FROM articles WHERE type='لائحة' AND title LIKE ? AND title!=?",
+                             (f"%{r['title']}%", r["title"])).fetchall()
+        if regs:
+            out["related_regulations"] = [x[0] for x in regs][:5]
+    return out
 
 
 def get_article(id=None, law=None, article=None):
@@ -314,6 +339,9 @@ def get_article(id=None, law=None, article=None):
         return {"error": "give an id, or both law and article"}
     nl, na = f"%{norm(law)}%", norm(article).strip()
     rows = c.execute("SELECT * FROM articles WHERE ntitle LIKE ? AND narticle=?", (nl, na)).fetchall()
+    if len(rows) > 1:  # the name may equal exactly one law's title (and only be a substring of its regulation's title)
+        exact = [x for x in rows if x["ntitle"] == norm(law).strip()]
+        rows = exact if len(exact) == 1 else rows
     if len(rows) != 1:  # never guess: 0 or several exact matches -> show candidates
         near = rows or c.execute("SELECT * FROM articles WHERE ntitle LIKE ? AND narticle LIKE ? LIMIT 8", (nl, f"%{na}%")).fetchall()
         return {"error": "no unique exact match; pick one by id" if near else "not found",

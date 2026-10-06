@@ -37,12 +37,38 @@ def passages():
     return out
 
 
+def cards():
+    """One short 'card' per law for routing a question to the right law: title + the official summary + chapter headings."""
+    laws = {}
+    for line in open(DATA / "articles.jsonl", encoding="utf-8"):
+        r = json.loads(line)
+        c = laws.setdefault(r["law_id"], {"title": r["title"], "pre": "", "secs": []})
+        if r["article"] == "الديباجة":
+            c["pre"] = r["text"][:700]
+        if r.get("section"):
+            for s in r["section"].split(" › "):
+                if s not in c["secs"] and len(c["secs"]) < 14:
+                    c["secs"].append(s)
+    return [(lid, "passage: " + c["title"] + "\n" + c["pre"] + "\n" + " | ".join(c["secs"])) for lid, c in laws.items()]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--batch", type=int, default=16)
+    ap.add_argument("--cards", action="store_true", help="embed one routing card per law (fast, ~5 min)")
     a = ap.parse_args()
     from fastembed import TextEmbedding
+
+    if a.cards:
+        cs = cards()
+        model = TextEmbedding(MODEL, threads=os.cpu_count())
+        vec = np.array(list(model.embed([t for _, t in cs], batch_size=a.batch)), dtype=np.float32)
+        vec = (vec / np.linalg.norm(vec, axis=1, keepdims=True)).astype(np.float16)
+        np.save(DATA / "lawcards.npy", vec)
+        (DATA / "lawcards.keys.json").write_text(json.dumps([k for k, _ in cs]), encoding="utf-8")
+        print("saved", vec.shape, flush=True)
+        return
 
     items = passages()
     if a.limit:
