@@ -210,6 +210,22 @@ def _snippet(text, terms, n):
     return ("…" if best else "") + text[best:best + n] + ("…" if best + n < len(text) else ""), True
 
 
+def _base(title):
+    """law title without year / parenthetical suffix, normalized: 'نظام التنفيذ 1433هـ' -> 'نظام تنفيذ'"""
+    return norm(re.sub(r"\d+\s*هـ?|\(.*?\)", "", title)).strip()
+
+
+def _upcoming_replacements(result_titles, db):
+    """Laws enacted but not yet in force whose name matches a law in the results (they will soon replace or amend it)."""
+    bases = {_base(t) for t in result_titles}
+    out = []
+    for t, d in db.execute("SELECT DISTINCT title, effective_from FROM articles "
+                           "WHERE status_code='not_yet' AND effective_from!='' AND effective_from>date('now')"):
+        if any(_base(t) == b or _base(t) in b for b in bases if b):
+            out.append(f"«{t}» (يسري من {d})")
+    return out
+
+
 def search(query=None, k=8, law=None, snippet_chars=350, include_inactive=False, queries=None):
     """Hybrid search. `queries` = several paraphrases / legal-term variants of the same question (fused)."""
     qs = [q for q in ([query] if query else []) + list(queries or []) if q and q.strip()]
@@ -248,6 +264,10 @@ def search(query=None, k=8, law=None, snippet_chars=350, include_inactive=False,
         out.append({"id": r["id"], "law": r["title"], "type": r["type"], "article": r["article"],
                     **({"section": r["section"]} if r["section"] else {}),
                     "text": cut, "truncated": truncated, **_tags(r)})
+    upcoming = _upcoming_replacements([r["title"] for r in rows.values()], db)
+    if upcoming:
+        out.append({"note": "⚠️ قريبًا: " + "؛ ".join(upcoming) + " — نظام صدر ولم يبدأ سريانه بعد وقد يحل محل النظام الحالي أو يعدله؛ "
+                            "نبّه المستخدم إلى ذلك (يمكن الاطلاع عليه بـ include_inactive=true، وليس نافذًا قبل ذلك التاريخ)."})
     if hidden:
         out.append({"note": f"{hidden} matching articles were hidden because they are repealed, repealed articles, "
                             "or in laws not yet in force; pass include_inactive=true to see them (not valid law)."})
@@ -436,11 +456,16 @@ def _venv_python():
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "serve"
     py = _venv_python()
-    if py and cmd in ("serve", "search"):  # semantic search needs numpy + fastembed, which live in the venv
+    if py and cmd in ("serve", "search", "call"):  # semantic search needs numpy + fastembed, which live in the venv
         import subprocess
         sys.exit(subprocess.call([str(py), __file__] + sys.argv[1:]))
     if cmd == "build":
         build()
+    elif cmd == "call":  # same functions as the MCP tools:  kb.py call search_saudi_laws '{"query": "...", "queries": [...]}'
+        dense_load()
+        out = call(sys.argv[2], json.loads(sys.argv[3]) if len(sys.argv) > 3 else {})
+        sys.stdout.reconfigure(encoding="utf-8")
+        print(json.dumps(out, ensure_ascii=False))
     elif cmd == "search":
         dense_load()
         print(json.dumps(search(" ".join(sys.argv[2:])), ensure_ascii=False, indent=1))
