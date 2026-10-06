@@ -302,7 +302,7 @@ def _dense_rankings(qs, cond, args):
 
 def _full(r):
     """one article for the caller: drop internal columns, keep status warnings"""
-    return {**{k: v for k, v in dict(r).items() if k not in ("ntitle", "narticle", "law_id", "url")}, **_tags(r)}
+    return {**{k: v for k, v in dict(r).items() if k not in ("ntitle", "narticle", "law_id")}, **_tags(r)}
 
 
 def get_article(id=None, law=None, article=None):
