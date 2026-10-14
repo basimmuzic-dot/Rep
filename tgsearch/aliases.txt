@@ -1,0 +1,7 @@
+# One group per line. Any word in a group also finds all the others.
+# Use this for things edit-distance can't catch: other spellings, Arabic <-> English.
+jeddah, jiddah, jedda, jidda, jiddha, جدة
+riyadh, riyad, الرياض
+makkah, mecca, مكة
+outlet, اوتلت, أوتلت
+discount, sale, تخفيض, خصم
