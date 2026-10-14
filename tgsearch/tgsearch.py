@@ -18,6 +18,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 import unicodedata
 from pathlib import Path
 
@@ -160,8 +161,21 @@ def sync(db: sqlite3.Connection, only: list[str] | None, limit_per_chat: int | N
     if not (api_id and api_hash):
         raise SystemExit("Set TG_API_ID and TG_API_HASH (from https://my.telegram.org -> API development tools).")
     session = str(DEFAULT_DB.parent / "session")
+    lock = DEFAULT_DB.parent / "sync.lock"
+    # one sync at a time (scheduled runs can overlap a slow first run); a lock older than 6h is stale
+    if lock.exists() and time.time() - lock.stat().st_mtime < 6 * 3600:
+        raise SystemExit("Another sync is already running (delete sync.lock if that's wrong).")
+    lock.write_text(str(os.getpid()))
+    try:
+        return _sync(db, only, limit_per_chat, session, int(api_id), api_hash,
+                     TelegramClient, Channel, Chat, User)
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def _sync(db, only, limit_per_chat, session, api_id, api_hash, TelegramClient, Channel, Chat, User) -> int:
     total = 0
-    with TelegramClient(session, int(api_id), api_hash) as client:
+    with TelegramClient(session, api_id, api_hash) as client:
         for dlg in client.iter_dialogs():
             ent = dlg.entity
             name = dlg.name or "(unnamed)"

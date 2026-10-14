@@ -44,7 +44,10 @@ messages read) and only fetches messages newer than what you already have.
    export TG_API_ID=123456 TG_API_HASH=abcdef...      # Windows: setx / $env:
    python tgsearch.py sync --limit-per-chat 2000      # first run, modest
    ```
-3. Schedule it.
+3. Schedule it. **Windows (easiest):** run `powershell -ExecutionPolicy Bypass -File .\setup_windows.ps1`.
+   It installs the packages, saves your keys, does the first login/sync, and creates a Task Scheduler job
+   (`tgsearch-sync`, every 3 hours, log in `%USERPROFILE%\.tgsearch\sync.log`). Not run on Windows yet, so
+   check Task Scheduler after setup. Other systems:
    - macOS/Linux: `crontab -e` → `0 */3 * * * TG_API_ID=... TG_API_HASH=... python /path/tgsearch.py sync`
    - Windows: Task Scheduler → run `python C:\path\tgsearch.py sync` every few hours.
 
